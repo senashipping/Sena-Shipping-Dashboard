@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Sena Brand Colors - Light Theme */
+    --background: 0 0% 100%; /* Pure white background */
+    --foreground: 213 47% 18%; /* Navy text */
+    --muted: 220 30% 94%;
+    --muted-foreground: 213 20% 50%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 47% 18%;
+    --card: 0 0% 100%;
+    --card-foreground: 213 47% 18%;
+    --border: 220 30% 88%;
+    --input: 220 30% 92%;
+    --primary: 213 47% 18%; /* Sena Navy */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 43% 65%; /* Light Blue */
+    --secondary-foreground: 213 47% 18%;
+    --accent: 43 73% 37%; /* Gold */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --ring: 213 47% 18%;
+    --radius: 0.75rem;
+  }
+
+    .dark {
+    /* Sena Brand Colors - Dark Theme */
+    --background: 213 47% 5%; /* Very dark navy background */
+    --foreground: 0 0% 98%; /* Very light text */
+    --muted: 213 30% 10%;
+    --muted-foreground: 0 0% 90%; /* Much whiter muted text */
+    --popover: 213 47% 12%; /* Dark popover background */
+    --popover-foreground: 0 0% 95%; /* Light text on dark popover */
+    --card: 0 0% 98%; /* Very light cards */
+    --card-foreground: 213 47% 18%; /* Dark text on light cards */
+    --border: 213 30% 20%;
+    --input: 0 0% 95%; /* Light input backgrounds */
+    --primary: 43 73% 50%; /* Sena Gold for dark mode */
+    --primary-foreground: 213 47% 18%;
+    --secondary: 210 43% 40%; /* Darker blue */
+    --secondary-foreground: 0 0% 98%; /* Very white text */
+    --accent: 210 43% 25%;
+    --accent-foreground: 220 30% 95%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 220 30% 95%;
+    --ring: 43 73% 50%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom styles */
+.form-field-required::after {
+  content: " *";
+  color: #ef4444;
+}
+
+.expiring-soon {
+  @apply text-orange-800 bg-orange-100 border-orange-500;
+}
+
+.expired {
+  @apply text-red-800 bg-red-100 border-red-500;
+}
+
+.valid {
+  @apply text-green-800 bg-green-100 border-green-500;
+}

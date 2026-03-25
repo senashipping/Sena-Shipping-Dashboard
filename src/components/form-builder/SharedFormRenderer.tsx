@@ -1,0 +1,556 @@
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Checkbox } from "../ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
+import { Label } from "../ui/label";
+import { Button } from "../ui/button";
+import { Plus, Trash2, Upload, X } from "lucide-react";
+import { FormField, FormSection, TableConfig } from "../../types";
+import { Alert, AlertDescription } from "../ui/alert";
+
+interface SharedFormRendererProps {
+  formState: {
+    formType: "regular" | "table" | "mixed";
+    title: string;
+    description?: string;
+    fields: FormField[];
+    sections: FormSection[];
+    tableConfig?: TableConfig;
+  };
+  formData: Record<string, any>;
+  tableData: any[];
+
+  onFieldChange: (fieldName: string, value: any) => void;
+  onTableChange?: (rowIndex: number, columnName: string, value: any) => void;
+  onMixedTableChange?: (sectionId: string, rowIndex: number, columnName: string, value: any) => void;
+  onAddTableRow?: (tableId?: string) => void;
+  onRemoveTableRow?: (rowIndex: number, tableId?: string) => void;
+  submitButton?: React.ReactNode;
+}
+
+const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
+  formState,
+  formData,
+  tableData,
+
+  onFieldChange,
+  onTableChange,
+  onMixedTableChange,
+  onAddTableRow,
+  onRemoveTableRow,
+  submitButton
+}) => {
+  const [signatureErrors, setSignatureErrors] = React.useState<Record<string, string>>({});
+
+  // Helper functions for pre-filled data
+  const getInitialCellValue = (config: TableConfig, rowIndex: number, columnName: string, userValue?: any) => {
+    // Check if there's a pre-filled value
+    const preFilledCell = config.preFilledData?.find(
+      cell => cell.rowIndex === rowIndex && cell.columnName === columnName
+    );
+    
+    if (preFilledCell && preFilledCell.isReadOnly) {
+      return preFilledCell.value;
+    }
+    
+    return userValue || '';
+  };
+
+  const isCellReadOnly = (config: TableConfig, rowIndex: number, columnName: string) => {
+    const preFilledCell = config.preFilledData?.find(
+      cell => cell.rowIndex === rowIndex && cell.columnName === columnName
+    );
+    return preFilledCell?.isReadOnly || false;
+  };
+
+  const handleSignatureUpload = async (fieldName: string, file: File | null) => {
+    if (!file) {
+      onFieldChange(fieldName, "");
+      setSignatureErrors(prev => ({ ...prev, [fieldName]: "" }));
+      return;
+    }
+
+    // Validate file type
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      setSignatureErrors(prev => ({ 
+        ...prev, 
+        [fieldName]: "Please upload a valid image file (JPEG, PNG, GIF, or WebP)" 
+      }));
+      return;
+    }
+
+    // Validate file size (2MB = 2 * 1024 * 1024 bytes)
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setSignatureErrors(prev => ({ 
+        ...prev, 
+        [fieldName]: "Image size must be less than 2MB" 
+      }));
+      return;
+    }
+
+    // Convert to base64
+    try {
+      const base64 = await fileToBase64(file);
+      onFieldChange(fieldName, base64);
+      setSignatureErrors(prev => ({ ...prev, [fieldName]: "" }));
+    } catch (error) {
+      setSignatureErrors(prev => ({ 
+        ...prev, 
+        [fieldName]: "Failed to process image. Please try again." 
+      }));
+    }
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const getFieldClassName = (field: FormField) => {
+    switch (field.layout?.width) {
+      case "half":
+        return "col-span-6";
+      case "third":
+        return "col-span-4";
+      case "quarter":
+        return "col-span-3";
+      case "auto":
+        return "col-span-auto";
+      case "full":
+      default:
+        return "col-span-12";
+    }
+  };
+
+  const renderField = (field: FormField) => {
+    const value = formData[field.name] || "";
+
+    switch (field.type) {
+      case "text":
+      case "email":
+      case "number":
+      case "date":
+      case "datetime-local":
+      case "time":
+      case "phone":
+      case "url":
+        return (
+          <Input
+            type={field.type}
+            value={value}
+            onChange={(e) => onFieldChange(field.name, e.target.value)}
+            placeholder={field.placeholder}
+            required={field.required}
+          />
+        );
+      
+      case "file":
+        return (
+          <div className="space-y-2">
+            <Input
+              type="file"
+              onChange={(e) => onFieldChange(field.name, e.target.files)}
+              required={field.required}
+              className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
+            />
+            {field.description && (
+              <p className="text-xs text-gray-500">{field.description}</p>
+            )}
+          </div>
+        );
+      
+      case "signature":
+        return (
+          <div className="space-y-2">
+            <div className="flex flex-col items-center justify-center w-full p-4 border-2 border-dashed rounded-lg bg-gray-50">
+              {value ? (
+                <div className="relative w-full">
+                  <img 
+                    src={value} 
+                    alt="Signature preview" 
+                    className="max-w-full max-h-40 mx-auto border border-gray-300 rounded"
+                  />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => {
+                      onFieldChange(field.name, "");
+                      setSignatureErrors(prev => ({ ...prev, [field.name]: "" }));
+                    }}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                  <Label 
+                    htmlFor={`signature-${field.name}`} 
+                    className="cursor-pointer text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    Click to upload signature
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Images only (JPEG, PNG, GIF, WebP) • Max 2MB
+                  </p>
+                  <Input
+                    id={`signature-${field.name}`}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      handleSignatureUpload(field.name, file);
+                    }}
+                    required={field.required}
+                  />
+                </div>
+              )}
+            </div>
+            {signatureErrors[field.name] && (
+              <Alert variant="destructive" className="py-2">
+                <AlertDescription className="text-sm">
+                  {signatureErrors[field.name]}
+                </AlertDescription>
+              </Alert>
+            )}
+            {field.description && !signatureErrors[field.name] && (
+              <p className="text-xs text-gray-500">{field.description}</p>
+            )}
+          </div>
+        );
+      
+      case "textarea":
+        return (
+          <Textarea
+            value={value}
+            onChange={(e) => onFieldChange(field.name, e.target.value)}
+            placeholder={field.placeholder}
+            required={field.required}
+            rows={4}
+          />
+        );
+      
+      case "select":
+        return (
+          <Select
+            value={value}
+            onValueChange={(value) => onFieldChange(field.name, value)}
+            required={field.required}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select an option" />
+            </SelectTrigger>
+            <SelectContent>
+              {field.options?.map((option: any) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        );
+      
+      case "checkbox":
+        return (
+          <div className="space-y-2">
+            {field.options?.map((option: any) => {
+              const isChecked = Array.isArray(value) ? value.includes(option.value) : false;
+              return (
+                <div key={option.value} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`${field.name}-${option.value}`}
+                    checked={isChecked}
+                    onCheckedChange={(checked) => {
+                      const currentValues = Array.isArray(value) ? value : [];
+                      if (checked) {
+                        // Add value to array if checked
+                        onFieldChange(field.name, [...currentValues, option.value]);
+                      } else {
+                        // Remove value from array if unchecked
+                        onFieldChange(field.name, currentValues.filter((v: any) => v !== option.value));
+                      }
+                    }}
+                  />
+                  <Label htmlFor={`${field.name}-${option.value}`} className="text-sm">
+                    {option.label}
+                  </Label>
+                </div>
+              );
+            })}
+          </div>
+        );
+      
+      case "radio":
+        return (
+          <RadioGroup
+            value={value}
+            onValueChange={(value) => onFieldChange(field.name, value)}
+          >
+            {field.options?.map((option: any) => (
+              <div key={option.value} className="flex items-center space-x-2">
+                <RadioGroupItem value={option.value} id={`${field.name}-${option.value}`} />
+                <Label htmlFor={`${field.name}-${option.value}`}>{option.label}</Label>
+              </div>
+            ))}
+          </RadioGroup>
+        );
+      
+      default:
+        return (
+          <Input
+            value={value}
+            onChange={(e) => onFieldChange(field.name, e.target.value)}
+            placeholder={field.placeholder}
+            required={field.required}
+          />
+        );
+    }
+  };
+
+  const renderTableInput = (column: any, rowIndex: number, value: any, sectionId?: string, tableConfig?: TableConfig) => {
+    // Get the actual cell value (pre-filled or user input)
+    const cellValue = tableConfig ? getInitialCellValue(tableConfig, rowIndex, column.name, value) : (value || '');
+    const isReadOnly = tableConfig ? isCellReadOnly(tableConfig, rowIndex, column.name) : false;
+
+    const handleChange = (newValue: any) => {
+      // Don't allow changes to read-only cells
+      if (isReadOnly) return;
+      
+      if (sectionId && onMixedTableChange) {
+        onMixedTableChange(sectionId, rowIndex, column.name, newValue);
+      } else if (onTableChange) {
+        onTableChange(rowIndex, column.name, newValue);
+      }
+    };
+
+    const inputClass = `${isReadOnly ? 'bg-blue-50 border-blue-200 cursor-not-allowed' : 'bg-white'}`;
+
+    switch (column.type) {
+      case "text":
+      case "number":
+      case "date":
+      case "email":
+      case "phone":
+        return (
+          <Input
+            type={column.type}
+            value={cellValue}
+            onChange={(e) => handleChange(e.target.value)}
+            required={column.required && !isReadOnly}
+            disabled={isReadOnly}
+            className={inputClass}
+          />
+        );
+      
+      case "select":
+        return (
+          <Select
+            value={cellValue}
+            onValueChange={handleChange}
+            required={column.required && !isReadOnly}
+            disabled={isReadOnly}
+          >
+            <SelectTrigger className={inputClass}>
+              <SelectValue placeholder={isReadOnly ? cellValue : "Select option"} />
+            </SelectTrigger>
+            {!isReadOnly && (
+              <SelectContent>
+                {column.options?.map((option: string) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            )}
+          </Select>
+        );
+      
+      case "checkbox":
+        return (
+          <Checkbox
+            checked={!!cellValue}
+            onCheckedChange={handleChange}
+            disabled={isReadOnly}
+            className={inputClass}
+          />
+        );
+      
+      default:
+        return (
+          <Input
+            value={cellValue}
+            onChange={(e) => handleChange(e.target.value)}
+            required={column.required && !isReadOnly}
+            disabled={isReadOnly}
+            className={inputClass}
+          />
+        );
+    }
+  };
+
+  const renderTable = (config: TableConfig, sectionId?: string) => {
+    const rows = sectionId 
+      ? (formData[`table_${sectionId}`] || [{}])
+      : tableData;
+
+    // Ensure we have at least the minimum required rows
+    const minRowsNeeded = Math.max(config.defaultRows, config.minRows);
+    while (rows.length < minRowsNeeded) {
+      rows.push({});
+    }
+
+    const handleAddRow = () => {
+      if (config.allowAddRows && onAddTableRow) {
+        onAddTableRow(sectionId ? sectionId : config.id);
+      }
+    };
+
+    const handleRemoveRow = (rowIndex: number) => {
+      if (config.allowDeleteRows && onRemoveTableRow) {
+        onRemoveTableRow(rowIndex, sectionId ? sectionId : config.id);
+      }
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="font-medium text-md">{config.title}</h4>
+          {config.allowAddRows && (
+            <Button 
+              type="button" 
+              onClick={handleAddRow}
+              size="sm"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Row
+            </Button>
+          )}
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full border border-collapse">
+            <thead>
+              <tr className="">
+                {config.columns.map((column) => (
+                  <th key={column.name} className="p-2 text-left border">
+                    {column.label}
+                    {column.required && <span className="ml-1 text-destructive">*</span>}
+                  </th>
+                ))}
+                {config.allowDeleteRows && (
+                  <th className="p-2 text-left border">Actions</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row: any, rowIndex: number) => (
+                <tr key={rowIndex}>
+                  {config.columns.map((column) => (
+                    <td key={column.name} className="p-2 border">
+                      {renderTableInput(column, rowIndex, row[column.name], sectionId, config)}
+                    </td>
+                  ))}
+                  {config.allowDeleteRows && (
+                    <td className="p-2 border">
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleRemoveRow(rowIndex)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        
+        {config.preFilledData && config.preFilledData.length > 0 && (
+          <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded">
+            ℹ️ Blue highlighted cells contain pre-filled data and cannot be modified.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>{formState.title}</CardTitle>
+          {formState.description && (
+            <p className="text-sm text-gray-600">{formState.description}</p>
+          )}
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            {formState.formType === "regular" && (
+              <div className="grid grid-cols-12 gap-4">
+                {formState.fields.map((field) => (
+                  <div key={field.id} className={`space-y-2 ${getFieldClassName(field)}`}>
+                    <Label htmlFor={field.name} className={field.required ? "form-field-required" : ""}>
+                      {field.label}
+                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                    </Label>
+                    {renderField(field)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {formState.formType === "mixed" && formState.sections.map((section) => (
+              <div key={section.id} className="space-y-4">
+                <h3 className="pb-2 text-lg font-semibold border-b">{section.title}</h3>
+                {section.description && (
+                  <p className="text-sm text-gray-600">{section.description}</p>
+                )}
+                
+                {section.type === "fields" && section.fields && (
+                  <div className="grid grid-cols-12 gap-4">
+                    {section.fields.map((field) => (
+                      <div key={field.id} className={`space-y-2 ${getFieldClassName(field)}`}>
+                        <Label htmlFor={field.name} className={field.required ? "form-field-required" : ""}>
+                          {field.label}
+                          {field.required && <span className="text-red-500 ml-1">*</span>}
+                        </Label>
+                        {renderField(field)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {section.type === "table" && section.tableConfig && renderTable(section.tableConfig, section.id)}
+              </div>
+            ))}
+
+            {formState.formType === "table" && formState.tableConfig && renderTable(formState.tableConfig)}
+
+            {submitButton && (
+              <div className="flex items-center space-x-4">
+                {submitButton}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default SharedFormRenderer;
