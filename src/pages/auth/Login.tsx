@@ -2,6 +2,8 @@
 
 import React from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../components/ui/toast";
+import { getApiErrorMessage } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
@@ -16,6 +18,7 @@ const Login: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   
   const { login } = useAuth();
+  const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,9 +27,11 @@ const Login: React.FC = () => {
 
     try {
       await login(email, password);
-      // Navigation is handled by AuthContext based on user role
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Login failed");
+      // Success toast + navigation are handled in AuthContext
+    } catch (err: unknown) {
+      const message = getApiErrorMessage(err, "Login failed");
+      setError(message);
+      toast({ title: "Sign in failed", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
     }

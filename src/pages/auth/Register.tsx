@@ -1,8 +1,9 @@
 "use client";
 
 import React from "react";
-import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../components/ui/toast";
+import { getApiErrorMessage } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
@@ -21,14 +22,16 @@ const Register: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   
   const { register } = useAuth();
-  const navigate = useNavigate();
+  const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
     if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match");
+      const msg = "Passwords do not match";
+      setError(msg);
+      toast({ title: "Check your password", description: msg, variant: "destructive" });
       return;
     }
 
@@ -41,9 +44,11 @@ const Register: React.FC = () => {
         password: formData.password,
         role: "user",
       });
-      navigate("/dashboard");
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Registration failed");
+      // Navigation + success toast are handled in AuthContext.register
+    } catch (err: unknown) {
+      const message = getApiErrorMessage(err, "Registration failed");
+      setError(message);
+      toast({ title: "Registration failed", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
     }

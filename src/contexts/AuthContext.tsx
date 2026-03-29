@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "react-toastify";
 import api from "../api";
 import { User, AuthState } from "../types";
 
@@ -131,7 +132,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAuthenticated: true,
         loading: false,
       });
-      
+
+      toast.success("Signed in successfully");
+
       // Navigate to appropriate dashboard based on role
       if (user.role === "admin" || user.role === "super_admin") {
         navigate("/admin");
@@ -158,6 +161,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem("user");
 
     api.logout();
+    toast.info("Signed out");
     navigate("/login");
   };
 
@@ -186,7 +190,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAuthenticated: true,
         loading: false,
       });
-      
+
+      toast.success("Account created — you're signed in");
+
       // Navigate based on role (users typically register as "user" role)
       if (user.role === "admin" || user.role === "super_admin") {
         navigate("/admin");
