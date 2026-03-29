@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import api from "../../api";
 import { Button } from "../../components/ui/button";
@@ -27,6 +27,11 @@ const AdminShips: React.FC = () => {
   const { data: shipsData, isLoading, refetch } = useQuery({
     queryKey: ["ships"],
     queryFn: () => api.getShips({}),
+  });
+
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ["users"],
+    queryFn: () => api.getUsers({}),
   });
 
   const createShipMutation = useMutation({
@@ -106,10 +111,42 @@ const AdminShips: React.FC = () => {
   };
 
   const rawShips = shipsData?.data?.data || [];
-  
-  // Apply client-side search including user name and email
-  const searchFields = ['name', 'imoNumber', 'user.name', 'user.email'];
-  const filteredShips = useClientSearch(rawShips, searchTerm, searchFields);
+  const rawUsers = usersData?.data?.data || [];
+
+  /** Assignments live on User (ship + userType), not on Ship.user — build deck/engine per ship for display */
+  const usersByShipId = useMemo(() => {
+    const map: Record<string, { deck?: any; engine?: any }> = {};
+    for (const u of rawUsers) {
+      if (u?.role !== "user" || !u?.ship?._id) continue;
+      const sid = u.ship._id;
+      if (!map[sid]) map[sid] = {};
+      if (u.userType === "deck") map[sid].deck = u;
+      if (u.userType === "engine") map[sid].engine = u;
+    }
+    return map;
+  }, [rawUsers]);
+
+  const shipsWithAssignments = useMemo(
+    () =>
+      rawShips.map((ship: any) => ({
+        ...ship,
+        deckOfficer: usersByShipId[ship._id]?.deck,
+        engineOfficer: usersByShipId[ship._id]?.engine,
+      })),
+    [rawShips, usersByShipId]
+  );
+
+  const searchFields = [
+    "name",
+    "imoNumber",
+    "deckOfficer.name",
+    "deckOfficer.email",
+    "engineOfficer.name",
+    "engineOfficer.email",
+    "user.name",
+    "user.email",
+  ];
+  const filteredShips = useClientSearch(shipsWithAssignments, searchTerm, searchFields);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -144,7 +181,7 @@ const AdminShips: React.FC = () => {
             </div>
           </div>
 
-          {isLoading ? (
+          {isLoading || usersLoading ? (
             <div className="flex items-center justify-center h-32">
               <div className="w-8 h-8 border-b-2 rounded-full animate-spin border-primary"></div>
             </div>
@@ -157,7 +194,7 @@ const AdminShips: React.FC = () => {
                   <TableHead>Vessel Type</TableHead>
                   <TableHead>Flag</TableHead>
                   <TableHead>Owner</TableHead>
-                  <TableHead>Assigned User</TableHead>
+                  <TableHead>Assigned officers</TableHead>
                   <TableHead>Status</TableHead>
                   {isSuperAdmin() && <TableHead>Actions</TableHead>}
                 </TableRow>
@@ -178,10 +215,32 @@ const AdminShips: React.FC = () => {
                     <TableCell>{ship.flag || "-"}</TableCell>
                     <TableCell>{ship.owner || "-"}</TableCell>
                     <TableCell>
-                      {ship.user ? (
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium">{ship.user.name}</span>
-                          <span className="text-xs">{ship.user.email}</span>
+                      {ship.deckOfficer || ship.engineOfficer || ship.user ? (
+                        <div className="flex flex-col gap-2 min-w-[10rem]">
+                          {ship.deckOfficer && (
+                            <div>
+                              <Badge variant="outline" className="text-[10px] mb-0.5">
+                                Deck
+                              </Badge>
+                              <div className="text-sm font-medium">{ship.deckOfficer.name}</div>
+                              <div className="text-xs text-muted-foreground">{ship.deckOfficer.email}</div>
+                            </div>
+                          )}
+                          {ship.engineOfficer && (
+                            <div>
+                              <Badge variant="secondary" className="text-[10px] mb-0.5">
+                                Engine
+                              </Badge>
+                              <div className="text-sm font-medium">{ship.engineOfficer.name}</div>
+                              <div className="text-xs text-muted-foreground">{ship.engineOfficer.email}</div>
+                            </div>
+                          )}
+                          {!ship.deckOfficer && !ship.engineOfficer && ship.user && (
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">{ship.user.name}</span>
+                              <span className="text-xs text-muted-foreground">{ship.user.email}</span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <Badge variant="outline" className="text-xs">
