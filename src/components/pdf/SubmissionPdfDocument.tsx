@@ -70,7 +70,13 @@ const ls = StyleSheet.create({
   },
 
   // ── Continuation header (fixed, every wrapped page) ──
+  // `Page` `paddingTop` insets the content box; without `absolute`, fixed nodes are
+  // laid out *below* that inset — a blank band above the bar. Pin to the real page top.
   contHeaderFixedWrap: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     width: "100%",
   },
   contHeader: {

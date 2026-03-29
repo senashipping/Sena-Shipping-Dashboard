@@ -316,7 +316,8 @@ export const PDF_FOOTER_RESERVE_PT = 28;
 
 /**
  * Thin submission continuation bar (`ContinuationHeader` in SubmissionPdfDocument) + gap below it.
- * Keep in sync with that component’s fixed block height.
+ * Used as `Page` `paddingTop` so flowing body clears the bar; the bar itself is `absolute` top 0
+ * so it is not pushed down by that padding (see `contHeaderFixedWrap` there).
  */
 export const PDF_CONTINUATION_HEADER_RESERVE_PT = 56;
 
