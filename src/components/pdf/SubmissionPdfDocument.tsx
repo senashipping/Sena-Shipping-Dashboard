@@ -2,8 +2,6 @@ import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import {
   FormTemplatePdfPageBody,
-  PDF_FOOTER_RESERVE_PT,
-  PDF_FORM_HEADER_RESERVE_PT,
   PdfPageFooter,
   SubmissionRecordPage,
   pdfStyles,
@@ -11,21 +9,22 @@ import {
 import { submissionToFormTemplatePdfProps } from "./submissionToFormTemplatePdfProps";
 import { formatDateTime } from "../../lib/utils";
 
-// ─── Colour tokens (aligned with FormTemplatePdfDocument) ───────────────────
+// ─── Colour tokens (kept in sync with FormTemplatePdfDocument) ─────────────
 const C = {
-  navy: "#0f2341",
-  teal: "#0d7fa5",
+  navy:      "#0f2341",
+  teal:      "#0d7fa5",
   tealLight: "#e6f4f9",
-  tealBorder: "#7ac8df",
-  silver: "#f4f6f8",
-  border: "#cdd5dc",
-  text: "#1e2a38",
-  muted: "#5a6a7a",
-  white: "#ffffff",
+  tealBorder:"#7ac8df",
+  silver:    "#f4f6f8",
+  border:    "#cdd5dc",
+  text:      "#1e2a38",
+  muted:     "#5a6a7a",
+  white:     "#ffffff",
 };
 
-// ─── Local styles (fallback page only) ─────────────────────────────────────
+// ─── Local styles for pieces specific to this file ─────────────────────────
 const ls = StyleSheet.create({
+  // ── Fallback page ──
   fallbackBody: {
     paddingHorizontal: 36,
     paddingTop: 24,
@@ -67,6 +66,35 @@ const ls = StyleSheet.create({
     color: C.navy,
     marginBottom: 4,
   },
+
+  // ── Continuation header (shown on form pages 2, 3…) ──
+  contHeader: {
+    backgroundColor: C.navy,
+    paddingHorizontal: 36,
+    paddingVertical: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: C.teal,
+  },
+  contHeaderLeft: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: C.white,
+    letterSpacing: 0.3,
+  },
+  contHeaderRight: {
+    fontSize: 7.5,
+    color: "#8eaec9",
+  },
+
+  // ── Divider ──
+  divider: {
+    height: 1,
+    backgroundColor: C.border,
+    marginVertical: 14,
+  },
   tealRule: {
     height: 2,
     backgroundColor: C.teal,
@@ -74,6 +102,7 @@ const ls = StyleSheet.create({
   },
 });
 
+// ─── Helpers ───────────────────────────────────────────────────────────────
 function submissionStatusLine(submission: {
   status?: string;
   submittedAt?: string;
@@ -96,10 +125,10 @@ function submissionStatusLine(submission: {
 }
 
 function formatSubmittedBy(submission: Record<string, any>): string | undefined {
-  const name = submission.user?.name;
+  const name  = submission.user?.name;
   const email = submission.user?.email;
   if (name && email) return `${name} (${email})`;
-  if (name) return String(name);
+  if (name)  return String(name);
   if (email) return String(email);
   return undefined;
 }
@@ -112,33 +141,50 @@ function submissionRecordProps(submission: Record<string, any>) {
     (typeof submission.reviewedBy === "string" ? submission.reviewedBy : undefined);
 
   return {
-    submittedBy: formatSubmittedBy(submission),
-    ship: submission.ship?.name ? String(submission.ship.name) : undefined,
-    submittedAt: submission.submittedAt ? formatDateTime(submission.submittedAt) : undefined,
-    status: submission.status,
+    submittedBy:    formatSubmittedBy(submission),
+    ship:           submission.ship?.name ? String(submission.ship.name) : undefined,
+    submittedAt:    submission.submittedAt ? formatDateTime(submission.submittedAt) : undefined,
+    status:         submission.status,
     statusLabel,
-    formTitle: submission.form?.title ? String(submission.form.title) : undefined,
-    reviewedBy: reviewedByStr,
-    reviewedAt: submission.reviewedAt ? formatDateTime(submission.reviewedAt) : undefined,
+    formTitle:      submission.form?.title ? String(submission.form.title) : undefined,
+    reviewedBy:     reviewedByStr,
+    reviewedAt:     submission.reviewedAt ? formatDateTime(submission.reviewedAt) : undefined,
     reviewComments: submission.reviewComments ? String(submission.reviewComments) : undefined,
   };
 }
 
+// ─── Continuation header ───────────────────────────────────────────────────
+// NOT fixed — renders once only. Using fixed=true reserves height on every
+// overflow page which, combined with wrap={false} blocks, creates white gaps.
+function ContinuationHeader({ title, vesselName }: { title?: string; vesselName?: string }) {
+  return (
+    <View style={ls.contHeader}>
+      <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
+      {vesselName ? (
+        <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+// ─── Styled fallback page body ──────────────────────────────────────────────
 function FallbackPageBody() {
   return (
     <View style={ls.fallbackBody}>
       <View style={ls.tealRule} />
       <View style={ls.fallbackCard}>
+        {/* Icon circle */}
         <View style={ls.fallbackIconWrap}>
           <Text style={ls.fallbackIcon}>!</Text>
         </View>
+        {/* Text block */}
         <View style={{ flex: 1 }}>
           <Text style={ls.fallbackTitle}>Form definition unavailable</Text>
           <Text style={ls.fallbackText}>
-            The form definition associated with this submission could not be retrieved. The submission
-            record above reflects all metadata captured at the time of filing. Please contact your system
-            administrator or refer to the original form entry in the SENA Ship Management platform for full
-            field details.
+            The form definition associated with this submission could not be retrieved.
+            The submission record above reflects all metadata captured at the time of filing.
+            Please contact your system administrator or refer to the original form entry
+            in the SENA Ship Management platform for full field details.
           </Text>
         </View>
       </View>
@@ -146,32 +192,26 @@ function FallbackPageBody() {
   );
 }
 
+// ─── Document ──────────────────────────────────────────────────────────────
 export interface SubmissionPdfDocumentProps {
   submission: Record<string, any>;
 }
 
-/**
- * PDF wiring:
- * - Page 1: `SubmissionRecordPage` (cover + review).
- * - Form section: fixed header/footer + `Page` padding so text clears both (see `PDF_*_RESERVE_PT`).
- */
 const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submission }) => {
   const formProps = submissionToFormTemplatePdfProps(submission);
-  const record = submissionRecordProps(submission);
+  const record   = submissionRecordProps(submission);
 
-  const formPageStyle = [
-    pdfStyles.page,
-    {
-      paddingTop: PDF_FORM_HEADER_RESERVE_PT,
-      paddingBottom: PDF_FOOTER_RESERVE_PT,
-    },
-  ];
-
+  // ── Fallback: no form definition ──
   if (!formProps) {
     return (
       <Document>
         <SubmissionRecordPage {...record} />
-        <Page size="A4" style={[pdfStyles.page, { paddingBottom: PDF_FOOTER_RESERVE_PT }]}>
+        <Page size="A4" style={pdfStyles.page}>
+          {/* Mini header so the page is not headless */}
+          <ContinuationHeader
+            title={record.formTitle || "Submission Detail"}
+            vesselName={record.ship}
+          />
           <FallbackPageBody />
           <PdfPageFooter />
         </Page>
@@ -179,16 +219,23 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
     );
   }
 
+  // ── Normal: submission + form content ──
   return (
     <Document>
+      {/* Page 1 — Submission record (meta + review section) */}
       <SubmissionRecordPage {...record} />
-      <Page size="A4" style={formPageStyle}>
-        <FormTemplatePdfPageBody
-          {...formProps}
-          omitHeader
-          internalFixedHeader
-          omitDescriptionInFixedHeader
+
+      {/* Page 2+ — Form body (auto-wraps across as many pages as needed) */}
+      <Page size="A4" style={pdfStyles.page}>
+        {/*
+          ContinuationHeader with fixed=true will be rendered at the top of
+          every page this <Page> flows onto (react-pdf behaviour).
+        */}
+        <ContinuationHeader
+          title={formProps.title || record.formTitle}
+          vesselName={record.ship}
         />
+        <FormTemplatePdfPageBody {...formProps} />
         <PdfPageFooter />
       </Page>
     </Document>
