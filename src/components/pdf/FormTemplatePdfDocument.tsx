@@ -31,11 +31,6 @@ const C = {
   dangerBg:   "#fee2e2",
 };
 
-/** A4 height in points (@react-pdf default). */
-export const PDF_PAGE_HEIGHT_PT = 841.89;
-/** Main content block: 75% of page — leaves room for header band + fixed footer. */
-export const PDF_BODY_MAX_HEIGHT_PT = PDF_PAGE_HEIGHT_PT * 0.75;
-
 // ─── Styles ────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   page: {
@@ -101,12 +96,11 @@ const s = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  // ── Body wrapper (cap height so header + footer + body fit the page) ──
+  // ── Body wrapper (paddingBottom clears fixed footer; do not set maxHeight — it squishes fields) ──
   body: {
     paddingHorizontal: 36,
     paddingTop: 20,
-    paddingBottom: 32,
-    maxHeight: PDF_BODY_MAX_HEIGHT_PT,
+    paddingBottom: 44,
   },
 
   // ── Meta cards row ──
@@ -372,7 +366,7 @@ function FieldBlock({
   const isFilled = variant === "filled" && text && text !== "\u2014";
 
   return (
-    <View wrap style={{ marginBottom: 2 }}>
+    <View wrap style={{ marginBottom: 12 }}>
       <Text style={s.fieldLabel}>
         {field.label}
         {field.required ? " *" : ""}

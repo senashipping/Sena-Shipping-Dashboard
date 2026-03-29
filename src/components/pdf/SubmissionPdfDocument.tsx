@@ -2,7 +2,6 @@ import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import {
   FormTemplatePdfPageBody,
-  PDF_BODY_MAX_HEIGHT_PT,
   PdfPageFooter,
   SubmissionRecordPage,
   pdfStyles,
@@ -29,7 +28,6 @@ const ls = StyleSheet.create({
     paddingHorizontal: 36,
     paddingTop: 24,
     paddingBottom: 48,
-    maxHeight: PDF_BODY_MAX_HEIGHT_PT,
   },
   fallbackCard: {
     borderWidth: 1,
