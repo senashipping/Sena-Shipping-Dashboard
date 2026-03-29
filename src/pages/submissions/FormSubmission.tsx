@@ -1,11 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../../api";
 import { Button } from "../../components/ui/button";
 import { Alert, AlertDescription } from "../../components/ui/alert";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, FileDown } from "lucide-react";
 import SharedFormRenderer from "../../components/form-builder/SharedFormRenderer";
+import FormTemplatePdfDocument from "../../components/pdf/FormTemplatePdfDocument";
+import { downloadPdfDocument } from "../../lib/pdfDownload";
+import { useToast } from "../../components/ui/toast";
 
 const FormSubmission: React.FC = () => {
   const { id: formId } = useParams<{ id: string }>();
@@ -14,6 +17,7 @@ const FormSubmission: React.FC = () => {
   const isAdminView = searchParams.get("admin") === "true";
   const submissionId = searchParams.get("submissionId"); // Get from query params if editing existing
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
@@ -29,6 +33,65 @@ const FormSubmission: React.FC = () => {
     queryFn: () => api.getSubmissionById(submissionId as string),
     enabled: !!submissionId,
   });
+
+  const fd = form?.data?.data;
+  const categoryLabel = useMemo(() => {
+    if (!fd?.category) return undefined;
+    if (typeof fd.category === "object" && fd.category !== null && "displayName" in fd.category) {
+      return (fd.category as { displayName: string }).displayName;
+    }
+    return undefined;
+  }, [fd]);
+
+  const exportBlankPdf = async () => {
+    if (!fd) return;
+    try {
+      await downloadPdfDocument(
+        <FormTemplatePdfDocument
+          title={fd.title || "Form"}
+          description={fd.description}
+          categoryLabel={categoryLabel}
+          formType={fd.formType}
+          fields={fd.fields}
+          sections={fd.sections}
+          tableConfig={fd.tableConfig}
+          variant="blank"
+          formData={{}}
+          tableData={[]}
+        />,
+        `${(fd.title || "form").replace(/\s+/g, "-")}-blank.pdf`
+      );
+      toast({ title: "PDF downloaded", variant: "success" });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Could not generate PDF";
+      toast({ title: "PDF export failed", description: msg, variant: "destructive" });
+    }
+  };
+
+  const exportDraftPdf = async () => {
+    if (!fd) return;
+    try {
+      await downloadPdfDocument(
+        <FormTemplatePdfDocument
+          title={fd.title || "Form"}
+          description={fd.description}
+          categoryLabel={categoryLabel}
+          formType={fd.formType}
+          fields={fd.fields}
+          sections={fd.sections}
+          tableConfig={fd.tableConfig}
+          variant="filled"
+          formData={formData}
+          tableData={tableData}
+        />,
+        `${(fd.title || "form").replace(/\s+/g, "-")}-draft.pdf`
+      );
+      toast({ title: "PDF downloaded", variant: "success" });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Could not generate PDF";
+      toast({ title: "PDF export failed", description: msg, variant: "destructive" });
+    }
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.createSubmission(data),
@@ -186,17 +249,31 @@ const FormSubmission: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center space-x-4">
-        <Button 
-          variant="outline" 
-          size="icon" 
-          onClick={() => navigate(isAdminView ? "/admin/submissions" : "/dashboard")}
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </Button>
-        <h1 className="text-3xl font-bold">
-          {form?.data?.data?.title || "Form Submission"}
-        </h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center space-x-4">
+          <Button 
+            variant="outline" 
+            size="icon" 
+            onClick={() => navigate(isAdminView ? "/admin/submissions" : "/dashboard")}
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <h1 className="text-3xl font-bold">
+            {form?.data?.data?.title || "Form Submission"}
+          </h1>
+        </div>
+        {fd ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={exportBlankPdf}>
+              <FileDown className="w-4 h-4 mr-2" />
+              Export blank PDF
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={exportDraftPdf}>
+              <FileDown className="w-4 h-4 mr-2" />
+              Export draft PDF
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {errorMessage && (

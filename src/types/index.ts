@@ -80,7 +80,7 @@ export interface TableColumn {
   id: string;
   name: string;
   label: string;
-  type: "text" | "number" | "date" | "select" | "checkbox" | "email" | "phone";
+  type: "text" | "number" | "date" | "select" | "checkbox" | "email" | "phone" | "signature";
   width?: number;
   required: boolean;
   options?: string[];

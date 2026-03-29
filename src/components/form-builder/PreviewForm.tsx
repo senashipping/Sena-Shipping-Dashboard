@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState, useImperativeHandle, forwardRef } from "react";
 import { Button } from "../ui/button";
 import SharedFormRenderer from "./SharedFormRenderer";
 import { FormField, FormSection, TableConfig } from "../../types";
@@ -14,19 +14,31 @@ interface PreviewFormProps {
   };
 }
 
-const PreviewForm: React.FC<PreviewFormProps> = ({ formState }) => {
+export type PreviewFormHandle = {
+  getValues: () => { formData: Record<string, any>; tableData: any[] };
+};
+
+const PreviewForm = forwardRef<PreviewFormHandle, PreviewFormProps>(({ formState }, ref) => {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      getValues: () => ({ formData, tableData }),
+    }),
+    [formData, tableData]
+  );
+
   const handleFieldChange = (fieldName: string, value: any) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [fieldName]: value
+      [fieldName]: value,
     }));
   };
 
   const handleTableChange = (rowIndex: number, columnName: string, value: any) => {
-    setTableData(prev => {
+    setTableData((prev) => {
       const newData = [...prev];
       if (!newData[rowIndex]) newData[rowIndex] = {};
       newData[rowIndex][columnName] = value;
@@ -36,63 +48,46 @@ const PreviewForm: React.FC<PreviewFormProps> = ({ formState }) => {
 
   const handleMixedTableChange = (sectionId: string, rowIndex: number, columnName: string, value: any) => {
     const tableKey = `table_${sectionId}`;
-    setFormData(prev => {
-      const tableData = prev[tableKey] || [];
-      const newTableData = [...tableData];
+    setFormData((prev) => {
+      const tableDataInner = prev[tableKey] || [];
+      const newTableData = [...tableDataInner];
       if (!newTableData[rowIndex]) {
         newTableData[rowIndex] = {};
       }
       newTableData[rowIndex][columnName] = value;
       return {
         ...prev,
-        [tableKey]: newTableData
+        [tableKey]: newTableData,
       };
     });
   };
 
   const handleAddTableRow = (tableId?: string) => {
     if (tableId) {
-      // Mixed form table
       const tableKey = `table_${tableId}`;
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
-        [tableKey]: [...(prev[tableKey] || [{}]), {}]
+        [tableKey]: [...(prev[tableKey] || [{}]), {}],
       }));
     } else {
-      // Regular table form
-      setTableData(prev => [...prev, {}]);
+      setTableData((prev) => [...prev, {}]);
     }
   };
 
   const handleRemoveTableRow = (rowIndex: number, tableId?: string) => {
     if (tableId) {
-      // Mixed form table
       const tableKey = `table_${tableId}`;
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
-        [tableKey]: (prev[tableKey] || []).filter((_: any, i: number) => i !== rowIndex)
+        [tableKey]: (prev[tableKey] || []).filter((_: any, i: number) => i !== rowIndex),
       }));
     } else {
-      // Regular table form
-      setTableData(prev => prev.filter((_, i) => i !== rowIndex));
+      setTableData((prev) => prev.filter((_, i) => i !== rowIndex));
     }
   };
 
-
-
-
-
-
-
-
-
-
-
   const submitButton = (
-    <Button
-      type="button"
-      className="w-full"
-    >
+    <Button type="button" className="w-full">
       Submit Form
     </Button>
   );
@@ -102,7 +97,6 @@ const PreviewForm: React.FC<PreviewFormProps> = ({ formState }) => {
       formState={formState}
       formData={formData}
       tableData={tableData}
-
       onFieldChange={handleFieldChange}
       onTableChange={handleTableChange}
       onMixedTableChange={handleMixedTableChange}
@@ -111,6 +105,8 @@ const PreviewForm: React.FC<PreviewFormProps> = ({ formState }) => {
       submitButton={submitButton}
     />
   );
-};
+});
+
+PreviewForm.displayName = "PreviewForm";
 
 export default PreviewForm;
