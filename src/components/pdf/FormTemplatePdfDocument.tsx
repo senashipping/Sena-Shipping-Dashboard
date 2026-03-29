@@ -31,6 +31,11 @@ const C = {
   dangerBg:   "#fee2e2",
 };
 
+/** A4 height in points (@react-pdf default). */
+export const PDF_PAGE_HEIGHT_PT = 841.89;
+/** Main content block: 75% of page — leaves room for header band + fixed footer. */
+export const PDF_BODY_MAX_HEIGHT_PT = PDF_PAGE_HEIGHT_PT * 0.75;
+
 // ─── Styles ────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   page: {
@@ -55,10 +60,20 @@ const s = StyleSheet.create({
     height: 4,
     backgroundColor: C.teal,
   },
-  headerTopRow: {
+  /** Stacked layout: title block full width, category badge on next row (no horizontal clash). */
+  headerBandStack: {
+    flexDirection: "column",
+    width: "100%",
+  },
+  headerTitleBlock: {
+    width: "100%",
+    paddingRight: 0,
+  },
+  headerCategoryRow: {
+    marginTop: 10,
     flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    flexWrap: "wrap",
+    alignItems: "center",
   },
   headerTitle: {
     fontSize: 20,
@@ -86,11 +101,12 @@ const s = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  // ── Body wrapper ──
+  // ── Body wrapper (cap height so header + footer + body fit the page) ──
   body: {
     paddingHorizontal: 36,
     paddingTop: 20,
-    paddingBottom: 24,
+    paddingBottom: 32,
+    maxHeight: PDF_BODY_MAX_HEIGHT_PT,
   },
 
   // ── Meta cards row ──
@@ -493,13 +509,15 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
       {/* Header */}
       <View style={s.headerBand}>
         <View style={s.accentStripe} />
-        <View style={s.headerTopRow}>
-          <View>
+        <View style={s.headerBandStack}>
+          <View style={s.headerTitleBlock}>
             <Text style={s.headerTitle}>Submission Record</Text>
             {formTitle && <Text style={s.headerSubtitle}>{formTitle}</Text>}
           </View>
-          <View style={s.headerBadge}>
-            <Text style={s.headerBadgeText}>SENA Ship Management</Text>
+          <View style={s.headerCategoryRow}>
+            <View style={s.headerBadge}>
+              <Text style={s.headerBadgeText}>SENA Ship Management</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -622,19 +640,21 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
       {/* Header */}
       <View style={s.headerBand}>
         <View style={s.accentStripe} />
-        <View style={s.headerTopRow}>
-          <View>
+        <View style={s.headerBandStack}>
+          <View style={s.headerTitleBlock}>
             <Text style={s.headerTitle}>{title || "Form"}</Text>
             {documentSubtitle ? (
               <Text style={s.headerSubtitle}>Vessel: {documentSubtitle}</Text>
             ) : null}
             {description ? <Text style={s.headerSubtitle}>{description}</Text> : null}
           </View>
-          {categoryLabel && (
-            <View style={s.headerBadge}>
-              <Text style={s.headerBadgeText}>{categoryLabel}</Text>
+          {categoryLabel ? (
+            <View style={s.headerCategoryRow}>
+              <View style={s.headerBadge}>
+                <Text style={s.headerBadgeText}>{categoryLabel}</Text>
+              </View>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
