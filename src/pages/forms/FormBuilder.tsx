@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -21,15 +21,12 @@ import { Label } from "../../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../../components/ui/dialog";
 
-import { ArrowLeft, Eye, Save, Undo, Redo, FileDown } from "lucide-react";
+import { ArrowLeft, Eye, Save, Undo, Redo } from "lucide-react";
 import { FormField, FormSection, TableConfig, Category, FieldTemplate, FormLayout } from "../../types";
 import FieldPalette from "../../components/form-builder/FieldPalette";
 import FormCanvas from "../../components/form-builder/FormCanvas";
 import PropertiesPanel from "../../components/form-builder/PropertiesPanel";
-import PreviewForm, { PreviewFormHandle } from "../../components/form-builder/PreviewForm";
-import FormTemplatePdfDocument from "../../components/pdf/FormTemplatePdfDocument";
-import { downloadPdfDocument } from "../../lib/pdfDownload";
-import { useToast } from "../../components/ui/toast";
+import PreviewForm from "../../components/form-builder/PreviewForm";
 
 interface FormBuilderState {
   title: string;
@@ -86,41 +83,6 @@ const FormBuilder: React.FC = () => {
     queryFn: () => api.getCategories({ isActive: true }),
   });
 
-  const previewFormRef = useRef<PreviewFormHandle>(null);
-  const { toast } = useToast();
-
-  const categoryDisplayName = useMemo(() => {
-    const list = categories?.data?.data;
-    if (!Array.isArray(list) || !formState.category) return undefined;
-    return (list as Category[]).find((c) => c._id === formState.category)?.displayName;
-  }, [categories, formState.category]);
-
-  const exportFormPdf = async (variant: "blank" | "filled") => {
-    try {
-      const snap = variant === "filled" ? previewFormRef.current?.getValues() : undefined;
-      const fd = variant === "blank" ? {} : snap?.formData ?? {};
-      const td = variant === "blank" ? [] : snap?.tableData ?? [];
-      await downloadPdfDocument(
-        <FormTemplatePdfDocument
-          title={formState.title || "Form"}
-          description={formState.description}
-          categoryLabel={categoryDisplayName}
-          formType={formState.formType}
-          fields={formState.fields}
-          sections={formState.sections}
-          tableConfig={formState.tableConfig}
-          variant={variant}
-          formData={fd}
-          tableData={td}
-        />,
-        `${(formState.title || "form").replace(/\s+/g, "-")}-${variant === "blank" ? "blank" : "preview"}.pdf`
-      );
-      toast({ title: "PDF downloaded", variant: "success" });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Could not generate PDF";
-      toast({ title: "PDF export failed", description: msg, variant: "destructive" });
-    }
-  };
   const { data: form } = useQuery({
     queryKey: ["form", id],
     queryFn: () => api.getFormById(id!),
@@ -694,30 +656,8 @@ const FormBuilder: React.FC = () => {
                     <DialogHeader>
                       <DialogTitle>Form Preview - {formState.title}</DialogTitle>
                     </DialogHeader>
-                    <div className="flex flex-col gap-2 mt-2 sm:flex-row sm:justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => exportFormPdf("blank")}
-                        className="w-full sm:w-auto"
-                      >
-                        <FileDown className="w-4 h-4 mr-2" />
-                        Export blank PDF
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => exportFormPdf("filled")}
-                        className="w-full sm:w-auto"
-                      >
-                        <FileDown className="w-4 h-4 mr-2" />
-                        Export preview PDF
-                      </Button>
-                    </div>
                     <div className="mt-4">
-                      <PreviewForm ref={previewFormRef} formState={formState} />
+                      <PreviewForm formState={formState} />
                     </div>
                   </DialogContent>
                 </Dialog>

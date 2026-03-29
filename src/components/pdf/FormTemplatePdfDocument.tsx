@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import {
   Document,
   Page,
@@ -199,7 +199,8 @@ function ensureTableRows(
   return base;
 }
 
-const FormTemplatePdfDocument: React.FC<FormTemplatePdfProps> = (props) => {
+/** Inner form layout (title, fields, tables) for embedding in one or more PDF pages. */
+export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) => {
   const {
     title,
     description,
@@ -214,87 +215,93 @@ const FormTemplatePdfDocument: React.FC<FormTemplatePdfProps> = (props) => {
   } = props;
 
   return (
-    <Document>
-      <Page size="A4" style={styles.page}>
-        <Text style={styles.title}>{title || "Form"}</Text>
-        <View style={styles.meta}>
-          {categoryLabel ? (
-            <Text style={styles.metaItem}>Category: {categoryLabel}</Text>
-          ) : null}
-          <Text style={styles.metaItem}>Type: {formType}</Text>
-        </View>
-        {description ? <Text style={styles.subtitle}>{description}</Text> : null}
+    <>
+      <Text style={styles.title}>{title || "Form"}</Text>
+      <View style={styles.meta}>
+        {categoryLabel ? (
+          <Text style={styles.metaItem}>Category: {categoryLabel}</Text>
+        ) : null}
+        <Text style={styles.metaItem}>Type: {formType}</Text>
+      </View>
+      {description ? <Text style={styles.subtitle}>{description}</Text> : null}
 
-        {formType === "regular" && (
-          <View>
-            <Text style={styles.sectionTitle}>Fields</Text>
-            {[...fields]
-              .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
-              .map((field) => (
-                <FieldBlock
-                  key={field.id}
-                  field={field}
-                  variant={variant}
-                  valueOverride={formData[field.name]}
-                />
-              ))}
-          </View>
-        )}
-
-        {formType === "table" && tableConfig && (
-          <View>
-            <Text style={styles.sectionTitle}>{tableConfig.title || "Table"}</Text>
-            {tableConfig.description ? (
-              <Text style={{ fontSize: 9, marginBottom: 4 }}>{tableConfig.description}</Text>
-            ) : null}
-            <TablePdf
-              columns={tableConfig.columns || []}
-              rows={ensureTableRows(tableConfig, tableData, variant)}
-              preFilledData={tableConfig.preFilledData}
-              variant={variant}
-            />
-          </View>
-        )}
-
-        {formType === "mixed" &&
-          sections
-            .slice()
+      {formType === "regular" && (
+        <View>
+          <Text style={styles.sectionTitle}>Fields</Text>
+          {[...fields]
             .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
-            .map((section) => (
-              <View key={section.id} wrap={false}>
-                <Text style={styles.sectionTitle}>{section.title}</Text>
-                {section.description ? (
-                  <Text style={{ fontSize: 9, marginBottom: 4 }}>{section.description}</Text>
-                ) : null}
-                {section.type === "fields" && section.fields && (
-                  <View>
-                    {section.fields.map((field) => (
-                      <FieldBlock
-                        key={field.id}
-                        field={field}
-                        variant={variant}
-                        valueOverride={formData[field.name]}
-                      />
-                    ))}
-                  </View>
-                )}
-                {section.type === "table" && section.tableConfig && (
-                  <TablePdf
-                    columns={section.tableConfig.columns || []}
-                    rows={ensureTableRows(
-                      section.tableConfig,
-                      formData[`table_${section.id}`],
-                      variant
-                    )}
-                    preFilledData={section.tableConfig.preFilledData}
-                    variant={variant}
-                  />
-                )}
-              </View>
+            .map((field) => (
+              <FieldBlock
+                key={field.id}
+                field={field}
+                variant={variant}
+                valueOverride={formData[field.name]}
+              />
             ))}
-      </Page>
-    </Document>
+        </View>
+      )}
+
+      {formType === "table" && tableConfig && (
+        <View>
+          <Text style={styles.sectionTitle}>{tableConfig.title || "Table"}</Text>
+          {tableConfig.description ? (
+            <Text style={{ fontSize: 9, marginBottom: 4 }}>{tableConfig.description}</Text>
+          ) : null}
+          <TablePdf
+            columns={tableConfig.columns || []}
+            rows={ensureTableRows(tableConfig, tableData, variant)}
+            preFilledData={tableConfig.preFilledData}
+            variant={variant}
+          />
+        </View>
+      )}
+
+      {formType === "mixed" &&
+        sections
+          .slice()
+          .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
+          .map((section) => (
+            <View key={section.id} wrap={false}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              {section.description ? (
+                <Text style={{ fontSize: 9, marginBottom: 4 }}>{section.description}</Text>
+              ) : null}
+              {section.type === "fields" && section.fields && (
+                <View>
+                  {section.fields.map((field) => (
+                    <FieldBlock
+                      key={field.id}
+                      field={field}
+                      variant={variant}
+                      valueOverride={formData[field.name]}
+                    />
+                  ))}
+                </View>
+              )}
+              {section.type === "table" && section.tableConfig && (
+                <TablePdf
+                  columns={section.tableConfig.columns || []}
+                  rows={ensureTableRows(
+                    section.tableConfig,
+                    formData[`table_${section.id}`],
+                    variant
+                  )}
+                  preFilledData={section.tableConfig.preFilledData}
+                  variant={variant}
+                />
+              )}
+            </View>
+          ))}
+    </>
   );
 };
+
+const FormTemplatePdfDocument: React.FC<FormTemplatePdfProps> = (props) => (
+  <Document>
+    <Page size="A4" style={styles.page}>
+      <FormTemplatePdfPageBody {...props} />
+    </Page>
+  </Document>
+);
 
 export default FormTemplatePdfDocument;

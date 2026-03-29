@@ -1,4 +1,4 @@
-import { useState, useImperativeHandle, forwardRef } from "react";
+import { useState, type FC } from "react";
 import { Button } from "../ui/button";
 import SharedFormRenderer from "./SharedFormRenderer";
 import { FormField, FormSection, TableConfig } from "../../types";
@@ -14,21 +14,9 @@ interface PreviewFormProps {
   };
 }
 
-export type PreviewFormHandle = {
-  getValues: () => { formData: Record<string, any>; tableData: any[] };
-};
-
-const PreviewForm = forwardRef<PreviewFormHandle, PreviewFormProps>(({ formState }, ref) => {
+const PreviewForm: FC<PreviewFormProps> = ({ formState }) => {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      getValues: () => ({ formData, tableData }),
-    }),
-    [formData, tableData]
-  );
 
   const handleFieldChange = (fieldName: string, value: any) => {
     setFormData((prev) => ({
@@ -105,8 +93,6 @@ const PreviewForm = forwardRef<PreviewFormHandle, PreviewFormProps>(({ formState
       submitButton={submitButton}
     />
   );
-});
-
-PreviewForm.displayName = "PreviewForm";
+};
 
 export default PreviewForm;

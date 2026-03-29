@@ -274,16 +274,23 @@ const UserDashboard: React.FC = () => {
           <CardContent>
             <div className="space-y-3">
               {expiring.slice(0, 5).map((submission: any) => (
-                <div key={submission._id} className="flex items-center justify-between p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
+                <div key={submission._id} className="flex flex-col gap-2 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 sm:flex-row sm:items-center sm:justify-between">
                   <div className="space-y-1">
                     <p className="font-medium">{submission.form.title}</p>
                     <p className="text-sm ">
                       Expires: {new Date(submission.expiryDate).toLocaleDateString()}
                     </p>
                   </div>
-                  <Badge variant="warning">
-                    {getExpirationStatus(submission.expiryDate)}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="warning">
+                      {getExpirationStatus(submission.expiryDate)}
+                    </Badge>
+                    <Link to={`/dashboard/submissions/${submission._id}`}>
+                      <Button variant="outline" size="sm">
+                        View submission
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
               ))}
             </div>
@@ -370,14 +377,21 @@ const UserDashboard: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {recent.map((submission: any) => (
-                <div key={submission._id} className="flex items-center justify-between pb-3 border-b">
+                <div key={submission._id} className="flex flex-col gap-2 pb-3 border-b sm:flex-row sm:items-center sm:justify-between">
                   <div className="space-y-1">
                     <p className="font-medium">{submission.form.title}</p>
                     <p className="text-sm ">
                       Submitted: {new Date(submission.submittedAt).toLocaleDateString()}
                     </p>
                   </div>
-                  {getStatusBadge(submission.status)}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {getStatusBadge(submission.status)}
+                    <Link to={`/dashboard/submissions/${submission._id}`}>
+                      <Button variant="outline" size="sm">
+                        View submission
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
               ))}
             </div>

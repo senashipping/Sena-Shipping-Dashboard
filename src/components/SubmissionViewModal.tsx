@@ -13,7 +13,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { ScrollArea } from "./ui/scroll-area";
 import { formatDate } from "../lib/utils";
-import { FileText, User, Ship, Calendar, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { FileText, User, Ship, Calendar, Clock, CheckCircle, XCircle, AlertCircle, FileDown } from "lucide-react";
+import { Button } from "./ui/button";
+import SubmissionPdfDocument from "./pdf/SubmissionPdfDocument";
+import { downloadPdfDocument } from "../lib/pdfDownload";
+import { useToast } from "./ui/toast";
 
 interface SubmissionViewModalProps {
   submissionId: string | null;
@@ -26,6 +30,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { toast } = useToast();
   const { data: submissionData, isLoading } = useQuery({
     queryKey: ["submission-detail", submissionId],
     queryFn: () => api.getSubmissionById(submissionId!),
@@ -259,17 +264,46 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
     );
   };
 
+  const exportSubmissionPdf = async () => {
+    try {
+      const title = (submission.form?.title || "form").replace(/\s+/g, "-");
+      const id = submission._id ?? submissionId ?? "submission";
+      const short =
+        typeof id === "string" && id.length > 8 ? id.slice(-8) : String(id);
+      await downloadPdfDocument(
+        <SubmissionPdfDocument submission={submission} />,
+        `${title}-submission-${short}.pdf`
+      );
+      toast({ title: "PDF downloaded", variant: "success" });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Could not generate PDF";
+      toast({ title: "PDF export failed", description: msg, variant: "destructive" });
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl max-h-[90vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Submission Details
-          </DialogTitle>
-          <DialogDescription>
-            Viewing submission for "{submission.form?.title}"
-          </DialogDescription>
+        <DialogHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:space-y-0">
+          <div className="space-y-1.5">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Submission Details
+            </DialogTitle>
+            <DialogDescription>
+              Viewing submission for "{submission.form?.title}"
+            </DialogDescription>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={exportSubmissionPdf}
+          >
+            <FileDown className="w-4 h-4 mr-2" />
+            Export PDF
+          </Button>
         </DialogHeader>
 
         <ScrollArea className="max-h-[calc(90vh-120px)]">
