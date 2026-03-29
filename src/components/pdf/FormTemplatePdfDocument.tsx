@@ -314,6 +314,12 @@ export const PDF_FORM_HEADER_RESERVE_PT = PDF_HEADER_BAND_APPROX_PT + PDF_GAP_AF
 /** Match fixed footer height (28pt); extra padding here only adds blank space above the footer. */
 export const PDF_FOOTER_RESERVE_PT = 28;
 
+/**
+ * Thin submission continuation bar (`ContinuationHeader` in SubmissionPdfDocument) + gap below it.
+ * Keep in sync with that component’s fixed block height.
+ */
+export const PDF_CONTINUATION_HEADER_RESERVE_PT = 56;
+
 export interface FormTemplatePdfProps {
   title: string;
   description?: string;

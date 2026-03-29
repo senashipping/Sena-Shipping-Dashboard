@@ -2,6 +2,8 @@ import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import {
   FormTemplatePdfPageBody,
+  PDF_CONTINUATION_HEADER_RESERVE_PT,
+  PDF_FOOTER_RESERVE_PT,
   PdfPageFooter,
   SubmissionRecordPage,
   pdfStyles,
@@ -67,7 +69,10 @@ const ls = StyleSheet.create({
     marginBottom: 4,
   },
 
-  // ── Continuation header (shown on form pages 2, 3…) ──
+  // ── Continuation header (fixed, every wrapped page) ──
+  contHeaderFixedWrap: {
+    width: "100%",
+  },
   contHeader: {
     backgroundColor: C.navy,
     paddingHorizontal: 36,
@@ -87,6 +92,11 @@ const ls = StyleSheet.create({
   contHeaderRight: {
     fontSize: 7.5,
     color: "#8eaec9",
+  },
+  /** Space after the navy bar (repeats on every page with the fixed header). */
+  contHeaderAfterGap: {
+    height: 16,
+    backgroundColor: C.white,
   },
 
   // ── Divider ──
@@ -154,15 +164,17 @@ function submissionRecordProps(submission: Record<string, any>) {
 }
 
 // ─── Continuation header ───────────────────────────────────────────────────
-// NOT fixed — renders once only. Using fixed=true reserves height on every
-// overflow page which, combined with wrap={false} blocks, creates white gaps.
+/** Repeats at the top of every page this `<Page>` wraps onto. Match `PDF_CONTINUATION_HEADER_RESERVE_PT`. */
 function ContinuationHeader({ title, vesselName }: { title?: string; vesselName?: string }) {
   return (
-    <View style={ls.contHeader}>
-      <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
-      {vesselName ? (
-        <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
-      ) : null}
+    <View style={ls.contHeaderFixedWrap} fixed>
+      <View style={ls.contHeader}>
+        <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
+        {vesselName ? (
+          <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
+        ) : null}
+      </View>
+      <View style={ls.contHeaderAfterGap} />
     </View>
   );
 }
@@ -206,8 +218,16 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
     return (
       <Document>
         <SubmissionRecordPage {...record} />
-        <Page size="A4" style={pdfStyles.page}>
-          {/* Mini header so the page is not headless */}
+        <Page
+          size="A4"
+          style={[
+            pdfStyles.page,
+            {
+              paddingTop: PDF_CONTINUATION_HEADER_RESERVE_PT,
+              paddingBottom: PDF_FOOTER_RESERVE_PT,
+            },
+          ]}
+        >
           <ContinuationHeader
             title={record.formTitle || "Submission Detail"}
             vesselName={record.ship}
@@ -226,11 +246,16 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
       <SubmissionRecordPage {...record} />
 
       {/* Page 2+ — Form body (auto-wraps across as many pages as needed) */}
-      <Page size="A4" style={pdfStyles.page}>
-        {/*
-          ContinuationHeader with fixed=true will be rendered at the top of
-          every page this <Page> flows onto (react-pdf behaviour).
-        */}
+      <Page
+        size="A4"
+        style={[
+          pdfStyles.page,
+          {
+            paddingTop: PDF_CONTINUATION_HEADER_RESERVE_PT,
+            paddingBottom: PDF_FOOTER_RESERVE_PT,
+          },
+        ]}
+      >
         <ContinuationHeader
           title={formProps.title || record.formTitle}
           vesselName={record.ship}
