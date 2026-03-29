@@ -18,6 +18,7 @@ function resolveCategoryLabel(form: { category?: unknown }): string | undefined 
 export function submissionToFormTemplatePdfProps(submission: {
   form?: Record<string, any> | null;
   data?: Record<string, any> | null;
+  ship?: { name?: string } | null;
 }): FormTemplatePdfProps | null {
   const form = submission.form;
   if (!form) return null;
@@ -40,6 +41,7 @@ export function submissionToFormTemplatePdfProps(submission: {
   return {
     title: String(form.title || "Form"),
     description: form.description,
+    documentSubtitle: submission.ship?.name ? String(submission.ship.name) : undefined,
     categoryLabel: resolveCategoryLabel(form),
     formType,
     fields: form.fields,

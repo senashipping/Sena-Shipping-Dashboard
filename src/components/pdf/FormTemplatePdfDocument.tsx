@@ -27,6 +27,8 @@ const C = {
   warning:    "#92400e",
   warningBg:  "#fef3c7",
   accent:     "#e85d26",   // orange stripe
+  danger:     "#b91c1c",
+  dangerBg:   "#fee2e2",
 };
 
 // ─── Styles ────────────────────────────────────────────────────────────────
@@ -292,6 +294,8 @@ export type FormTemplatePdfVariant = "blank" | "filled";
 export interface FormTemplatePdfProps {
   title: string;
   description?: string;
+  /** Shown under the title in the header (e.g. vessel name). */
+  documentSubtitle?: string;
   categoryLabel?: string;
   formType: "regular" | "table" | "mixed";
   fields?: FormField[];
@@ -327,6 +331,10 @@ function formatFieldValue(field: FormField, raw: any, variant: FormTemplatePdfVa
 function statusStyle(status?: string) {
   if (!status) return null;
   const lower = status.toLowerCase();
+  if (lower.includes("reject") || lower.includes("denied"))
+    return { bg: C.dangerBg, fg: C.danger };
+  if (lower.includes("expir"))
+    return { bg: C.warningBg, fg: C.warning };
   if (lower.includes("approv") || lower.includes("complet"))
     return { bg: C.successBg, fg: C.success };
   if (lower.includes("pending") || lower.includes("review"))
@@ -348,14 +356,16 @@ function FieldBlock({
   const isFilled = variant === "filled" && text && text !== "\u2014";
 
   return (
-    <View wrap={false} style={{ marginBottom: 2 }}>
+    <View wrap style={{ marginBottom: 2 }}>
       <Text style={s.fieldLabel}>
         {field.label}
         {field.required ? " *" : ""}
       </Text>
       {field.description ? <Text style={s.fieldDesc}>{field.description}</Text> : null}
       {field.type === "signature" && imageSrc ? (
-        <Image src={imageSrc} style={{ width: 140, height: 48, marginBottom: 10 }} />
+        <View style={{ borderWidth: 1, borderColor: C.border, borderRadius: 3, padding: 6, marginBottom: 10, backgroundColor: C.white }}>
+          <Image src={imageSrc} style={{ width: 180, height: 56, objectFit: "contain" }} />
+        </View>
       ) : (
         <View style={isFilled ? s.fieldBoxFilled : s.fieldBox}>
           <Text style={s.fieldValue}>{text || " "}</Text>
@@ -439,13 +449,30 @@ function SectionHeading({ title }: { title: string }) {
   );
 }
 
+// ─── Shared footer (repeats on every page when placed inside Page) ────────
+export const PdfPageFooter: React.FC = () => (
+  <View style={s.footer} fixed>
+    <Text style={s.footerText}>SENA Ship Management — Confidential</Text>
+    <Text style={s.footerText}>
+      Page <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+    </Text>
+    <Text style={s.footerAccent}>senashipping.com</Text>
+  </View>
+);
+
 // ─── Page 1: Submission Record ────────────────────────────────────────────
 interface SubmissionRecordProps {
   submittedBy?: string;
   ship?: string;
   submittedAt?: string;
+  /** Used with statusStyle (raw or display). */
   status?: string;
+  /** Human-readable label for the status badge. */
+  statusLabel?: string;
   formTitle?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewComments?: string;
 }
 
 export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
@@ -453,9 +480,14 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
   ship,
   submittedAt,
   status,
+  statusLabel,
   formTitle,
+  reviewedBy,
+  reviewedAt,
+  reviewComments,
 }) => {
-  const st = statusStyle(status);
+  const st = statusStyle(statusLabel || status);
+  const badgeText = statusLabel || status || "\u2014";
   return (
     <Page size="A4" style={s.page}>
       {/* Header */}
@@ -497,13 +529,52 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
             <Text style={s.metaLabel}>Status</Text>
             {st ? (
               <View style={[s.statusBadge, { backgroundColor: st.bg, marginTop: 2 }]}>
-                <Text style={[s.statusText, { color: st.fg }]}>{status}</Text>
+                <Text style={[s.statusText, { color: st.fg }]}>{badgeText}</Text>
               </View>
             ) : (
-              <Text style={s.metaValue}>{status || "\u2014"}</Text>
+              <Text style={s.metaValue}>{badgeText}</Text>
             )}
           </View>
         </View>
+
+        {(reviewedBy || reviewedAt || reviewComments) && (
+          <>
+            <View style={s.divider} />
+            <View style={s.sectionHeading}>
+              <View style={s.sectionPill} />
+              <Text style={s.sectionTitle}>Review</Text>
+            </View>
+            <View style={s.metaRow}>
+              {reviewedBy ? (
+                <View style={s.metaCard}>
+                  <Text style={s.metaLabel}>Reviewed By</Text>
+                  <Text style={s.metaValue}>{reviewedBy}</Text>
+                </View>
+              ) : null}
+              {reviewedAt ? (
+                <View style={s.metaCard}>
+                  <Text style={s.metaLabel}>Reviewed At</Text>
+                  <Text style={s.metaValue}>{reviewedAt}</Text>
+                </View>
+              ) : null}
+            </View>
+            {reviewComments ? (
+              <View
+                style={{
+                  marginTop: 10,
+                  backgroundColor: C.silver,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  borderRadius: 4,
+                  padding: 10,
+                }}
+              >
+                <Text style={s.metaLabel}>Comments</Text>
+                <Text style={{ fontSize: 9, color: C.text, marginTop: 4 }}>{reviewComments}</Text>
+              </View>
+            ) : null}
+          </>
+        )}
 
         <View style={s.divider} />
 
@@ -525,14 +596,7 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
         </View>
       </View>
 
-      {/* Footer */}
-      <View style={s.footer} fixed>
-        <Text style={s.footerText}>SENA Ship Management — Confidential</Text>
-        <Text style={s.footerText}>
-          Page <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
-        </Text>
-        <Text style={s.footerAccent}>senashipping.com</Text>
-      </View>
+      <PdfPageFooter />
     </Page>
   );
 };
@@ -542,6 +606,7 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
   const {
     title,
     description,
+    documentSubtitle,
     categoryLabel,
     formType,
     fields = [],
@@ -560,7 +625,10 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
         <View style={s.headerTopRow}>
           <View>
             <Text style={s.headerTitle}>{title || "Form"}</Text>
-            {description && <Text style={s.headerSubtitle}>{description}</Text>}
+            {documentSubtitle ? (
+              <Text style={s.headerSubtitle}>Vessel: {documentSubtitle}</Text>
+            ) : null}
+            {description ? <Text style={s.headerSubtitle}>{description}</Text> : null}
           </View>
           {categoryLabel && (
             <View style={s.headerBadge}>
@@ -655,16 +723,12 @@ const FormTemplatePdfDocument: React.FC<FormTemplatePdfProps> = (props) => (
   <Document>
     <Page size="A4" style={s.page}>
       <FormTemplatePdfPageBody {...props} />
-      {/* Footer */}
-      <View style={s.footer} fixed>
-        <Text style={s.footerText}>SENA Ship Management — Confidential</Text>
-        <Text style={s.footerText}>
-          Page <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
-        </Text>
-        <Text style={s.footerAccent}>senashipping.com</Text>
-      </View>
+      <PdfPageFooter />
     </Page>
   </Document>
 );
+
+/** Shared StyleSheet for `<Page style={pdfStyles.page}>` in submission exports. */
+export const pdfStyles = s;
 
 export default FormTemplatePdfDocument;

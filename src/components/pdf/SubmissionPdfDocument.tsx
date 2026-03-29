@@ -1,34 +1,23 @@
 import React from "react";
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import { FormTemplatePdfPageBody } from "./FormTemplatePdfDocument";
+import { Document, Page, Text, View } from "@react-pdf/renderer";
+import {
+  FormTemplatePdfPageBody,
+  PdfPageFooter,
+  SubmissionRecordPage,
+  pdfStyles,
+} from "./FormTemplatePdfDocument";
 import { submissionToFormTemplatePdfProps } from "./submissionToFormTemplatePdfProps";
 import { formatDateTime } from "../../lib/utils";
-
-const page = StyleSheet.create({
-  page: {
-    padding: 36,
-    fontSize: 10,
-    fontFamily: "Helvetica",
-  },
-  heading: {
-    fontSize: 14,
-    marginBottom: 12,
-    fontFamily: "Helvetica-Bold",
-  },
-  row: { marginBottom: 8 },
-  label: { fontSize: 9, fontFamily: "Helvetica-Bold", marginBottom: 2 },
-  value: { fontSize: 9 },
-});
 
 function submissionStatusLine(submission: {
   status?: string;
   submittedAt?: string;
   form?: { validityPeriod?: number };
 }): string {
-  const s = submission.status || "";
-  if (s === "pending") return "Pending review";
-  if (s === "rejected") return "Rejected";
-  if (s === "approved") {
+  const st = submission.status || "";
+  if (st === "pending") return "Pending review";
+  if (st === "rejected") return "Rejected";
+  if (st === "approved") {
     if (submission.submittedAt && submission.form?.validityPeriod != null) {
       const submissionDate = new Date(submission.submittedAt);
       const validityPeriod = submission.form.validityPeriod || 30;
@@ -38,74 +27,57 @@ function submissionStatusLine(submission: {
     }
     return "Approved";
   }
-  return s || "Unknown";
+  return st || "Unknown";
+}
+
+function formatSubmittedBy(submission: Record<string, any>): string | undefined {
+  const name = submission.user?.name;
+  const email = submission.user?.email;
+  if (name && email) return `${name} (${email})`;
+  if (name) return String(name);
+  if (email) return String(email);
+  return undefined;
 }
 
 export interface SubmissionPdfDocumentProps {
   submission: Record<string, any>;
 }
 
+const submissionRecordProps = (submission: Record<string, any>) => {
+  const statusLabel = submissionStatusLine(submission);
+  const reviewedByStr =
+    submission.reviewedBy?.name ||
+    submission.reviewedBy?.email ||
+    (typeof submission.reviewedBy === "string" ? submission.reviewedBy : undefined);
+
+  return {
+    submittedBy: formatSubmittedBy(submission),
+    ship: submission.ship?.name ? String(submission.ship.name) : undefined,
+    submittedAt: submission.submittedAt ? formatDateTime(submission.submittedAt) : undefined,
+    status: submission.status,
+    statusLabel,
+    formTitle: submission.form?.title ? String(submission.form.title) : undefined,
+    reviewedBy: reviewedByStr,
+    reviewedAt: submission.reviewedAt ? formatDateTime(submission.reviewedAt) : undefined,
+    reviewComments: submission.reviewComments ? String(submission.reviewComments) : undefined,
+  };
+};
+
 const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submission }) => {
   const formProps = submissionToFormTemplatePdfProps(submission);
-
-  const meta = (
-    <>
-      <Text style={page.heading}>Submission record</Text>
-      <View style={page.row}>
-        <Text style={page.label}>Submitted by</Text>
-        <Text style={page.value}>
-          {submission.user?.name || "—"}
-          {submission.user?.email ? ` (${submission.user.email})` : ""}
-        </Text>
-      </View>
-      <View style={page.row}>
-        <Text style={page.label}>Ship</Text>
-        <Text style={page.value}>{submission.ship?.name || "—"}</Text>
-      </View>
-      <View style={page.row}>
-        <Text style={page.label}>Submitted at</Text>
-        <Text style={page.value}>
-          {submission.submittedAt ? formatDateTime(submission.submittedAt) : "—"}
-        </Text>
-      </View>
-      <View style={page.row}>
-        <Text style={page.label}>Status</Text>
-        <Text style={page.value}>{submissionStatusLine(submission)}</Text>
-      </View>
-      {(submission.reviewedAt || submission.reviewedBy || submission.reviewComments) && (
-        <>
-          <Text style={[page.heading, { marginTop: 12 }]}>Review</Text>
-          {submission.reviewedBy && (
-            <View style={page.row}>
-              <Text style={page.label}>Reviewed by</Text>
-              <Text style={page.value}>
-                {submission.reviewedBy.name || submission.reviewedBy.email || "—"}
-              </Text>
-            </View>
-          )}
-          {submission.reviewedAt && (
-            <View style={page.row}>
-              <Text style={page.label}>Reviewed at</Text>
-              <Text style={page.value}>{formatDateTime(submission.reviewedAt)}</Text>
-            </View>
-          )}
-          {submission.reviewComments ? (
-            <View style={page.row}>
-              <Text style={page.label}>Comments</Text>
-              <Text style={page.value}>{String(submission.reviewComments)}</Text>
-            </View>
-          ) : null}
-        </>
-      )}
-    </>
-  );
+  const record = submissionRecordProps(submission);
 
   if (!formProps) {
     return (
       <Document>
-        <Page size="A4" style={page.page}>
-          {meta}
-          <Text style={{ marginTop: 12 }}>Form definition was not available.</Text>
+        <SubmissionRecordPage {...record} />
+        <Page size="A4" style={pdfStyles.page}>
+          <View style={{ paddingHorizontal: 36, paddingTop: 20, paddingBottom: 40 }}>
+            <Text style={{ fontSize: 10, color: "#5a6a7a" }}>
+              Form definition was not available for this submission.
+            </Text>
+          </View>
+          <PdfPageFooter />
         </Page>
       </Document>
     );
@@ -113,11 +85,10 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
 
   return (
     <Document>
-      <Page size="A4" style={page.page}>
-        {meta}
-      </Page>
-      <Page size="A4" style={page.page}>
+      <SubmissionRecordPage {...record} />
+      <Page size="A4" style={pdfStyles.page}>
         <FormTemplatePdfPageBody {...formProps} />
+        <PdfPageFooter />
       </Page>
     </Document>
   );
