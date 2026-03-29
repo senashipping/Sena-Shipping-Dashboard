@@ -12,10 +12,11 @@ import { ConfirmationDialog } from "../../components/ui/confirmation-dialog";
 import { Form } from "../../types";
 import { formatDateTime } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
-// Note: Replace with your actual toast implementation
+import { useToast } from "../../components/ui/toast";
 
 const AdminForms: React.FC = () => {
   const { isSuperAdmin } = useAuth();
+  const { toast } = useToast();
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [itemsPerPage] = useState<number>(25);
@@ -23,12 +24,6 @@ const AdminForms: React.FC = () => {
     isOpen: boolean;
     form: any | null;
   }>({ isOpen: false, form: null });
-  
-  // Simple toast implementation - replace with your actual toast system
-  const toast = ({ title: _title, description: _description, variant: _variant }: { title: string; description: string; variant?: string }) => {
-    // Toast notification shown
-    // You can integrate with your preferred toast library here
-  };
 
   const { data: forms, isLoading: formsLoading, refetch: refetchForms } = useQuery({
     queryKey: ["admin-forms", selectedCategory, currentPage, itemsPerPage],
@@ -62,8 +57,9 @@ const AdminForms: React.FC = () => {
     mutationFn: () => api.triggerFormStatusCheck(),
     onSuccess: () => {
       toast({
-        title: "Success", 
+        title: "Success",
         description: "Form status notifications triggered successfully",
+        variant: "success",
       });
     },
     onError: (error: any) => {
@@ -81,6 +77,7 @@ const AdminForms: React.FC = () => {
       toast({
         title: "Success",
         description: "Form deleted successfully",
+        variant: "success",
       });
       setDeleteConfirmation({ isOpen: false, form: null });
       refetchForms(); // Refetch forms after deletion

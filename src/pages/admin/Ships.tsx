@@ -5,7 +5,6 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import { Alert, AlertDescription } from "../../components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Badge } from "../../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../components/ui/dialog";
@@ -13,9 +12,12 @@ import { ConfirmationDialog } from "../../components/ui/confirmation-dialog";
 import { Plus, Search, Edit, Trash2 } from "lucide-react";
 import { useClientSearch } from "../../hooks/useDebounce";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../components/ui/toast";
+import { getApiErrorMessage } from "../../lib/utils";
 
 const AdminShips: React.FC = () => {
   const { isSuperAdmin } = useAuth();
+  const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingShip, setEditingShip] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -40,9 +42,14 @@ const AdminShips: React.FC = () => {
       setIsCreateDialogOpen(false);
       setEditingShip(null);
       refetch();
+      toast({ title: "Ship created", variant: "success" });
     },
     onError: (error) => {
-      console.error('Create ship error:', error);
+      toast({
+        title: "Failed to create ship",
+        description: getApiErrorMessage(error, "Failed to create ship"),
+        variant: "destructive",
+      });
     },
   });
 
@@ -52,9 +59,14 @@ const AdminShips: React.FC = () => {
       setIsCreateDialogOpen(false);
       setEditingShip(null);
       refetch();
+      toast({ title: "Ship updated", variant: "success" });
     },
     onError: (error) => {
-      console.error('Update ship error:', error);
+      toast({
+        title: "Failed to update ship",
+        description: getApiErrorMessage(error, "Failed to update ship"),
+        variant: "destructive",
+      });
     },
   });
 
@@ -63,6 +75,14 @@ const AdminShips: React.FC = () => {
     onSuccess: () => {
       refetch();
       setDeleteConfirmation({ isOpen: false, ship: null });
+      toast({ title: "Ship deleted", variant: "success" });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to delete ship",
+        description: getApiErrorMessage(error, "Failed to delete ship"),
+        variant: "destructive",
+      });
     },
   });
 
@@ -291,26 +311,6 @@ const AdminShips: React.FC = () => {
             <DialogTitle>{editingShip ? "Edit Ship" : "Add New Ship"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={editingShip ? handleUpdateShip : handleCreateShip} className="space-y-4">
-            {createShipMutation.error ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  {String(createShipMutation.error instanceof Error 
-                    ? createShipMutation.error.message 
-                    : "Failed to create ship")}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            
-            {updateShipMutation.error ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  {String(updateShipMutation.error instanceof Error 
-                    ? updateShipMutation.error.message 
-                    : "Failed to update ship")}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="name">Ship Name</Label>

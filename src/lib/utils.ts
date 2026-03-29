@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Message from axios error responses or Error, for toast / UI */
+export function getApiErrorMessage(error: unknown, fallback = "Something went wrong"): string {
+  if (error && typeof error === "object" && "response" in error) {
+    const msg = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+    if (typeof msg === "string" && msg.trim()) return msg;
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 export function formatDate(date: string | Date): string {
   return new Date(date).toLocaleDateString("en-US", {
     year: "numeric",

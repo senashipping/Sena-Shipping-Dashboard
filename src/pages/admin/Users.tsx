@@ -14,9 +14,12 @@ import { ConfirmationDialog } from "../../components/ui/confirmation-dialog";
 import { Plus, Search, Edit, Trash2 } from "lucide-react";
 import { useClientSearch } from "../../hooks/useDebounce";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../components/ui/toast";
+import { getApiErrorMessage } from "../../lib/utils";
 
 const AdminUsers: React.FC = () => {
   const { isSuperAdmin } = useAuth();
+  const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -48,9 +51,14 @@ const AdminUsers: React.FC = () => {
       setIsCreateDialogOpen(false);
       setEditingUser(null);
       refetch();
+      toast({ title: "User created", variant: "success" });
     },
     onError: (error) => {
-      console.error('Create user error:', error);
+      toast({
+        title: "Failed to create user",
+        description: getApiErrorMessage(error, "Failed to create user"),
+        variant: "destructive",
+      });
     },
   });
 
@@ -60,9 +68,14 @@ const AdminUsers: React.FC = () => {
       setIsCreateDialogOpen(false);
       setEditingUser(null);
       refetch();
+      toast({ title: "User updated", variant: "success" });
     },
     onError: (error) => {
-      console.error('Update user error:', error);
+      toast({
+        title: "Failed to update user",
+        description: getApiErrorMessage(error, "Failed to update user"),
+        variant: "destructive",
+      });
     },
   });
 
@@ -71,6 +84,14 @@ const AdminUsers: React.FC = () => {
     onSuccess: () => {
       refetch();
       setDeleteConfirmation({ isOpen: false, user: null });
+      toast({ title: "User deleted", variant: "success" });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to delete user",
+        description: getApiErrorMessage(error, "Failed to delete user"),
+        variant: "destructive",
+      });
     },
   });
 
