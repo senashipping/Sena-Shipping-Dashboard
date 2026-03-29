@@ -5,6 +5,17 @@ import { useNavigate } from "react-router-dom";
 import api from "../api";
 import { User, AuthState } from "../types";
 
+/** Auth endpoints often wrap the user in `{ data: user }` like login; support both shapes */
+function userFromAuthResponse(data: unknown): User {
+  if (data && typeof data === "object" && "data" in data) {
+    const inner = (data as { data: unknown }).data;
+    if (inner != null && typeof inner === "object" && ("email" in inner || "_id" in inner)) {
+      return inner as User;
+    }
+  }
+  return data as User;
+}
+
 interface AuthContextType {
   auth: AuthState;
   login: (email: string, password: string) => Promise<void>;
@@ -188,25 +199,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateProfile = async (profileData: any) => {
-    try {
-      const response = await api.updateProfile(profileData);
-      const updatedUser = response.data;
+    const response = await api.updateProfile(profileData);
+    const updatedUser = userFromAuthResponse(response.data);
 
-      setAuth(prev => ({
-        ...prev,
-        user: updatedUser,
-      }));
-
-      // Update localStorage
+    setAuth((prev) => {
+      const next = { ...prev, user: updatedUser };
       localStorage.setItem("user", JSON.stringify(updatedUser));
-
-      api.setAuthState({
-        ...auth,
-        user: updatedUser,
-      });
-    } catch (error) {
-      throw error;
-    }
+      api.setAuthState(next);
+      return next;
+    });
   };
 
   const changePassword = async (passwordData: any) => {
@@ -222,19 +223,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       const response = await api.getProfile();
-      const user = response.data;
+      const user = userFromAuthResponse(response.data);
 
-      setAuth(prev => ({
-        ...prev,
-        user,
-      }));
-
-      // Update localStorage
-      localStorage.setItem("user", JSON.stringify(user));
-
-      api.setAuthState({
-        ...auth,
-        user,
+      setAuth((prev) => {
+        const next = { ...prev, user };
+        localStorage.setItem("user", JSON.stringify(user));
+        api.setAuthState(next);
+        return next;
       });
     } catch (error) {
       console.error("Error refreshing user:", error);

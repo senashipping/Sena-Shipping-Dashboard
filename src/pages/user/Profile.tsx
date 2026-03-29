@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "../../api";
 import { Button } from "../../components/ui/button";
@@ -7,10 +8,14 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Alert, AlertDescription } from "../../components/ui/alert";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../components/ui/toast";
+import { getApiErrorMessage } from "../../lib/utils";
 import { User, Mail, Building } from "lucide-react";
 
 const UserProfile: React.FC = () => {
-  const { auth, updateProfile, changePassword } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { auth, updateProfile, changePassword, isAdmin } = useAuth();
   const [profileForm, setProfileForm] = useState({
     name: auth.user?.name || "",
     email: auth.user?.email || "",
@@ -22,7 +27,6 @@ const UserProfile: React.FC = () => {
   });
   const [profileError, setProfileError] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [profileSuccess, setProfileSuccess] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState("");
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -36,14 +40,16 @@ const UserProfile: React.FC = () => {
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileError("");
-    setProfileSuccess("");
     setIsUpdatingProfile(true);
 
     try {
       await updateProfile(profileForm);
-      setProfileSuccess("Profile updated successfully");
-    } catch (err: any) {
-      setProfileError(err.response?.data?.message || "Failed to update profile");
+      toast({ title: "Profile updated", variant: "success" });
+      navigate(isAdmin() ? "/admin" : "/dashboard", { replace: true });
+    } catch (err: unknown) {
+      const message = getApiErrorMessage(err, "Failed to update profile");
+      setProfileError(message);
+      toast({ title: "Update failed", description: message, variant: "destructive" });
     } finally {
       setIsUpdatingProfile(false);
     }
@@ -97,12 +103,6 @@ const UserProfile: React.FC = () => {
             {profileError && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>{profileError}</AlertDescription>
-              </Alert>
-            )}
-            
-            {profileSuccess && (
-              <Alert className="mb-4">
-                <AlertDescription>{profileSuccess}</AlertDescription>
               </Alert>
             )}
             
