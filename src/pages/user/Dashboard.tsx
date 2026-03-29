@@ -287,7 +287,7 @@ const UserDashboard: React.FC = () => {
                     </Badge>
                     <Link to={`/dashboard/submissions/${submission._id}`}>
                       <Button variant="outline" size="sm">
-                        View submission
+                        View Submission
                       </Button>
                     </Link>
                   </div>
@@ -388,7 +388,7 @@ const UserDashboard: React.FC = () => {
                     {getStatusBadge(submission.status)}
                     <Link to={`/dashboard/submissions/${submission._id}`}>
                       <Button variant="outline" size="sm">
-                        View submission
+                        View Submission
                       </Button>
                     </Link>
                   </div>

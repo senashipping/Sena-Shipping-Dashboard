@@ -6,40 +6,289 @@ import {
   View,
   StyleSheet,
   Image,
+  Line,
+  Svg,
 } from "@react-pdf/renderer";
 import type { FormField, FormSection, TableColumn, TableConfig } from "../../types";
 
-const styles = StyleSheet.create({
+// ─── Colour palette ────────────────────────────────────────────────────────
+const C = {
+  navy:       "#0f2341",
+  navyMid:    "#1a3558",
+  teal:       "#0d7fa5",
+  tealLight:  "#e6f4f9",
+  tealBorder: "#7ac8df",
+  silver:     "#f4f6f8",
+  silver2:    "#e8ecf0",
+  border:     "#cdd5dc",
+  text:       "#1e2a38",
+  muted:      "#5a6a7a",
+  white:      "#ffffff",
+  success:    "#166534",
+  successBg:  "#dcfce7",
+  warning:    "#92400e",
+  warningBg:  "#fef3c7",
+  accent:     "#e85d26",   // orange stripe
+};
+
+// ─── Styles ────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
   page: {
-    padding: 36,
-    fontSize: 10,
     fontFamily: "Helvetica",
+    fontSize: 9,
+    color: C.text,
+    backgroundColor: C.white,
   },
-  title: { fontSize: 16, marginBottom: 8, fontFamily: "Helvetica-Bold" },
-  subtitle: { fontSize: 9, color: "#444", marginBottom: 12 },
-  sectionTitle: { fontSize: 12, marginTop: 12, marginBottom: 6, fontFamily: "Helvetica-Bold" },
-  label: { fontSize: 9, fontFamily: "Helvetica-Bold", marginBottom: 2 },
-  valueBox: {
+
+  // ── Header band ──
+  headerBand: {
+    backgroundColor: C.navy,
+    paddingHorizontal: 36,
+    paddingTop: 22,
+    paddingBottom: 18,
+  },
+  accentStripe: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: C.teal,
+  },
+  headerTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontFamily: "Helvetica-Bold",
+    color: C.white,
+    letterSpacing: 0.5,
+  },
+  headerSubtitle: {
+    fontSize: 9,
+    color: "#8eaec9",
+    marginTop: 3,
+  },
+  headerBadge: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    padding: 6,
-    minHeight: 18,
-    marginBottom: 8,
+    borderColor: C.teal,
+    borderRadius: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
-  row: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#ddd" },
-  cell: { flex: 1, padding: 4, fontSize: 8 },
-  headerCell: {
+  headerBadgeText: {
+    fontSize: 8,
+    color: C.teal,
+    fontFamily: "Helvetica-Bold",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+
+  // ── Body wrapper ──
+  body: {
+    paddingHorizontal: 36,
+    paddingTop: 20,
+    paddingBottom: 24,
+  },
+
+  // ── Meta cards row ──
+  metaRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 18,
+  },
+  metaCard: {
     flex: 1,
-    padding: 4,
+    backgroundColor: C.silver,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 4,
+    padding: 10,
+  },
+  metaCardAccent: {
+    flex: 1,
+    backgroundColor: C.tealLight,
+    borderWidth: 1,
+    borderColor: C.tealBorder,
+    borderRadius: 4,
+    padding: 10,
+  },
+  metaLabel: {
+    fontSize: 7,
+    fontFamily: "Helvetica-Bold",
+    color: C.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  metaValue: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: C.text,
+  },
+
+  // ── Status badge ──
+  statusBadge: {
+    alignSelf: "flex-start",
+    borderRadius: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  statusText: {
     fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    backgroundColor: "#f0f0f0",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
-  tableWrap: { marginTop: 6, borderWidth: 1, borderColor: "#ccc" },
-  meta: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
-  metaItem: { fontSize: 9, marginRight: 12, marginBottom: 4 },
+
+  // ── Divider ──
+  divider: {
+    height: 1,
+    backgroundColor: C.border,
+    marginVertical: 14,
+  },
+  dividerTeal: {
+    height: 2,
+    backgroundColor: C.teal,
+    marginBottom: 14,
+  },
+
+  // ── Section heading ──
+  sectionHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+    marginTop: 6,
+  },
+  sectionPill: {
+    width: 4,
+    height: 16,
+    backgroundColor: C.teal,
+    borderRadius: 2,
+    marginRight: 8,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontFamily: "Helvetica-Bold",
+    color: C.navy,
+  },
+  sectionDesc: {
+    fontSize: 8,
+    color: C.muted,
+    marginBottom: 10,
+    marginLeft: 12,
+  },
+
+  // ── Field blocks ──
+  fieldLabel: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
+    color: C.navyMid,
+    marginBottom: 3,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  fieldDesc: {
+    fontSize: 7.5,
+    color: C.muted,
+    marginBottom: 3,
+  },
+  fieldBox: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 3,
+    backgroundColor: C.silver,
+    padding: 7,
+    minHeight: 20,
+    marginBottom: 10,
+  },
+  fieldBoxFilled: {
+    borderWidth: 1,
+    borderColor: C.tealBorder,
+    borderRadius: 3,
+    backgroundColor: C.tealLight,
+    padding: 7,
+    minHeight: 20,
+    marginBottom: 10,
+  },
+  fieldValue: {
+    fontSize: 9,
+    color: C.text,
+  },
+
+  // ── Table ──
+  tableWrap: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  tableHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: C.navy,
+  },
+  tableHeaderCell: {
+    flex: 1,
+    padding: 6,
+    fontSize: 7.5,
+    fontFamily: "Helvetica-Bold",
+    color: C.white,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  tableRow: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    backgroundColor: C.white,
+  },
+  tableRowAlt: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    backgroundColor: C.silver,
+  },
+  tableCell: {
+    flex: 1,
+    padding: 5,
+    fontSize: 8,
+    color: C.text,
+  },
+  tableCellMuted: {
+    flex: 1,
+    padding: 5,
+    fontSize: 8,
+    color: "#aab4c0",
+  },
+
+  // ── Footer ──
+  footer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    backgroundColor: C.navy,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 36,
+  },
+  footerText: {
+    fontSize: 7,
+    color: "#8eaec9",
+  },
+  footerAccent: {
+    fontSize: 7,
+    color: C.teal,
+    fontFamily: "Helvetica-Bold",
+  },
 });
 
+// ─── Types ────────────────────────────────────────────────────────────────
 export type FormTemplatePdfVariant = "blank" | "filled";
 
 export interface FormTemplatePdfProps {
@@ -55,38 +304,39 @@ export interface FormTemplatePdfProps {
   variant: FormTemplatePdfVariant;
 }
 
-function formatFieldValue(
-  field: FormField,
-  raw: any,
-  variant: FormTemplatePdfVariant
-): { text?: string; imageSrc?: string } {
-  if (variant === "blank" && field.type !== "signature") {
-    return { text: "" };
-  }
+// ─── Helpers ─────────────────────────────────────────────────────────────
+function formatFieldValue(field: FormField, raw: any, variant: FormTemplatePdfVariant) {
+  if (variant === "blank" && field.type !== "signature") return { text: "" };
   if (raw === undefined || raw === null || raw === "") {
-    if (variant === "blank") return { text: "" };
-    return { text: "\u2014" };
+    return { text: variant === "blank" ? "" : "\u2014" };
   }
-
   switch (field.type) {
     case "checkbox": {
       if (!Array.isArray(raw)) return { text: String(raw) };
-      const labels =
-        field.options?.filter((o) => raw.includes(o.value)).map((o) => o.label) || [];
+      const labels = field.options?.filter((o) => raw.includes(o.value)).map((o) => o.label) || [];
       return { text: labels.length ? labels.join(", ") : "\u2014" };
     }
     case "signature": {
-      const s = String(raw);
-      if (s.startsWith("data:image")) return { imageSrc: s };
-      return { text: s || "\u2014" };
+      const s2 = String(raw);
+      if (s2.startsWith("data:image")) return { imageSrc: s2 };
+      return { text: s2 || "\u2014" };
     }
-    case "file":
-      return { text: String(raw) };
     default:
       return { text: String(raw) };
   }
 }
 
+function statusStyle(status?: string) {
+  if (!status) return null;
+  const lower = status.toLowerCase();
+  if (lower.includes("approv") || lower.includes("complet"))
+    return { bg: C.successBg, fg: C.success };
+  if (lower.includes("pending") || lower.includes("review"))
+    return { bg: C.warningBg, fg: C.warning };
+  return { bg: C.silver2, fg: C.muted };
+}
+
+// ─── FieldBlock ───────────────────────────────────────────────────────────
 function FieldBlock({
   field,
   variant,
@@ -96,32 +346,28 @@ function FieldBlock({
   variant: FormTemplatePdfVariant;
   valueOverride?: any;
 }) {
-  const raw = valueOverride;
-  const { text, imageSrc } = formatFieldValue(field, raw, variant);
-  const showEmpty = variant === "blank" || !text?.trim();
+  const { text, imageSrc } = formatFieldValue(field, valueOverride, variant);
+  const isFilled = variant === "filled" && text && text !== "\u2014";
 
   return (
-    <View wrap={false}>
-      <Text style={styles.label}>
+    <View wrap={false} style={{ marginBottom: 2 }}>
+      <Text style={s.fieldLabel}>
         {field.label}
         {field.required ? " *" : ""}
       </Text>
-      {field.description ? (
-        <Text style={{ fontSize: 8, color: "#666", marginBottom: 2 }}>{field.description}</Text>
-      ) : null}
+      {field.description ? <Text style={s.fieldDesc}>{field.description}</Text> : null}
       {field.type === "signature" && imageSrc ? (
-        <Image src={imageSrc} style={{ width: 140, height: 48, marginBottom: 8 }} />
+        <Image src={imageSrc} style={{ width: 140, height: 48, marginBottom: 10 }} />
       ) : (
-        <View style={styles.valueBox}>
-          <Text style={{ fontSize: 9 }}>
-            {showEmpty && variant === "blank" ? " " : text || " "}
-          </Text>
+        <View style={isFilled ? s.fieldBoxFilled : s.fieldBox}>
+          <Text style={s.fieldValue}>{text || " "}</Text>
         </View>
       )}
     </View>
   );
 }
 
+// ─── TablePdf ─────────────────────────────────────────────────────────────
 function TablePdf({
   columns,
   rows,
@@ -133,44 +379,41 @@ function TablePdf({
   rows: any[];
   variant: FormTemplatePdfVariant;
 }) {
-  const sortedCols = [...columns].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const sorted = [...columns].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-  const cellDisplay = (rowIndex: number, col: TableColumn, row: any) => {
-    const pf = preFilledData?.find(
-      (p) => p.rowIndex === rowIndex && p.columnName === col.name
-    );
+  const cellDisplay = (ri: number, col: TableColumn, row: any) => {
+    const pf = preFilledData?.find((p) => p.rowIndex === ri && p.columnName === col.name);
     const raw = pf ? pf.value : row?.[col.name];
-    if (variant === "blank" && !pf) {
-      return { text: "" };
-    }
-    if (col.type === "signature" && raw && String(raw).startsWith("data:image")) {
+    if (variant === "blank" && !pf) return { text: "" };
+    if (col.type === "signature" && raw && String(raw).startsWith("data:image"))
       return { imageSrc: String(raw) };
-    }
-    if (raw === undefined || raw === null || raw === "") {
+    if (raw === undefined || raw === null || raw === "")
       return { text: variant === "blank" ? "" : "\u2014" };
-    }
     return { text: String(raw) };
   };
 
   return (
-    <View style={styles.tableWrap}>
-      <View style={[styles.row, { borderBottomWidth: 1 }]}>
-        {sortedCols.map((c) => (
-          <Text key={c.name} style={styles.headerCell}>
+    <View style={s.tableWrap}>
+      {/* Header */}
+      <View style={s.tableHeaderRow}>
+        {sorted.map((c) => (
+          <Text key={c.name} style={s.tableHeaderCell}>
             {c.label}
           </Text>
         ))}
       </View>
+      {/* Rows */}
       {rows.map((row, ri) => (
-        <View key={ri} style={styles.row} wrap={false}>
-          {sortedCols.map((col) => {
+        <View key={ri} style={ri % 2 === 0 ? s.tableRow : s.tableRowAlt} wrap={false}>
+          {sorted.map((col) => {
             const disp = cellDisplay(ri, col, row);
+            const isEmpty = !disp.text || disp.text === "\u2014";
             return (
-              <View key={col.name} style={styles.cell}>
+              <View key={col.name} style={isEmpty ? s.tableCellMuted : s.tableCell}>
                 {"imageSrc" in disp && disp.imageSrc ? (
                   <Image src={disp.imageSrc!} style={{ width: 60, height: 22 }} />
                 ) : (
-                  <Text style={{ fontSize: 8 }}>{disp.text ?? ""}</Text>
+                  <Text>{disp.text ?? ""}</Text>
                 )}
               </View>
             );
@@ -181,25 +424,122 @@ function TablePdf({
   );
 }
 
-function ensureTableRows(
-  config: TableConfig,
-  existing: any[] | undefined,
-  variant: FormTemplatePdfVariant
-): any[] {
-  const n = Math.max(
-    config.defaultRows ?? 1,
-    config.minRows ?? 1,
-    Array.isArray(existing) ? existing.length : 0
-  );
+function ensureTableRows(config: TableConfig, existing: any[] | undefined, variant: FormTemplatePdfVariant): any[] {
+  const n = Math.max(config.defaultRows ?? 1, config.minRows ?? 1, Array.isArray(existing) ? existing.length : 0);
   const base = Array.isArray(existing) ? [...existing] : [];
   while (base.length < n) base.push({});
-  if (variant === "blank") {
-    return base.map(() => ({}));
-  }
-  return base;
+  return variant === "blank" ? base.map(() => ({})) : base;
 }
 
-/** Inner form layout (title, fields, tables) for embedding in one or more PDF pages. */
+// ─── Section heading helper ───────────────────────────────────────────────
+function SectionHeading({ title }: { title: string }) {
+  return (
+    <View style={s.sectionHeading}>
+      <View style={s.sectionPill} />
+      <Text style={s.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+// ─── Page 1: Submission Record ────────────────────────────────────────────
+interface SubmissionRecordProps {
+  submittedBy?: string;
+  ship?: string;
+  submittedAt?: string;
+  status?: string;
+  formTitle?: string;
+}
+
+export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
+  submittedBy,
+  ship,
+  submittedAt,
+  status,
+  formTitle,
+}) => {
+  const st = statusStyle(status);
+  return (
+    <Page size="A4" style={s.page}>
+      {/* Header */}
+      <View style={s.headerBand}>
+        <View style={s.accentStripe} />
+        <View style={s.headerTopRow}>
+          <View>
+            <Text style={s.headerTitle}>Submission Record</Text>
+            {formTitle && <Text style={s.headerSubtitle}>{formTitle}</Text>}
+          </View>
+          <View style={s.headerBadge}>
+            <Text style={s.headerBadgeText}>SENA Ship Management</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Body */}
+      <View style={[s.body, { paddingBottom: 40 }]}>
+        <View style={s.dividerTeal} />
+
+        {/* Meta cards */}
+        <View style={s.metaRow}>
+          <View style={s.metaCardAccent}>
+            <Text style={s.metaLabel}>Submitted By</Text>
+            <Text style={s.metaValue}>{submittedBy || "\u2014"}</Text>
+          </View>
+          <View style={s.metaCard}>
+            <Text style={s.metaLabel}>Ship / Vessel</Text>
+            <Text style={s.metaValue}>{ship || "\u2014"}</Text>
+          </View>
+        </View>
+
+        <View style={s.metaRow}>
+          <View style={s.metaCard}>
+            <Text style={s.metaLabel}>Submitted At</Text>
+            <Text style={s.metaValue}>{submittedAt || "\u2014"}</Text>
+          </View>
+          <View style={s.metaCard}>
+            <Text style={s.metaLabel}>Status</Text>
+            {st ? (
+              <View style={[s.statusBadge, { backgroundColor: st.bg, marginTop: 2 }]}>
+                <Text style={[s.statusText, { color: st.fg }]}>{status}</Text>
+              </View>
+            ) : (
+              <Text style={s.metaValue}>{status || "\u2014"}</Text>
+            )}
+          </View>
+        </View>
+
+        <View style={s.divider} />
+
+        {/* Decorative info note */}
+        <View
+          style={{
+            backgroundColor: C.silver,
+            borderLeftWidth: 3,
+            borderLeftColor: C.teal,
+            borderRadius: 3,
+            padding: 10,
+            marginTop: 4,
+          }}
+        >
+          <Text style={{ fontSize: 8, color: C.muted }}>
+            This submission record was automatically generated by the SENA Ship Management
+            platform. Please retain this document for your records and compliance audits.
+          </Text>
+        </View>
+      </View>
+
+      {/* Footer */}
+      <View style={s.footer} fixed>
+        <Text style={s.footerText}>SENA Ship Management — Confidential</Text>
+        <Text style={s.footerText}>
+          Page <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+        </Text>
+        <Text style={s.footerAccent}>senashipping.com</Text>
+      </View>
+    </Page>
+  );
+};
+
+// ─── Page 2+: Form Body ───────────────────────────────────────────────────
 export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) => {
   const {
     title,
@@ -216,90 +556,115 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
 
   return (
     <>
-      <Text style={styles.title}>{title || "Form"}</Text>
-      <View style={styles.meta}>
-        {categoryLabel ? (
-          <Text style={styles.metaItem}>Category: {categoryLabel}</Text>
-        ) : null}
-        <Text style={styles.metaItem}>Type: {formType}</Text>
-      </View>
-      {description ? <Text style={styles.subtitle}>{description}</Text> : null}
-
-      {formType === "regular" && (
-        <View>
-          <Text style={styles.sectionTitle}>Fields</Text>
-          {[...fields]
-            .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
-            .map((field) => (
-              <FieldBlock
-                key={field.id}
-                field={field}
-                variant={variant}
-                valueOverride={formData[field.name]}
-              />
-            ))}
-        </View>
-      )}
-
-      {formType === "table" && tableConfig && (
-        <View>
-          <Text style={styles.sectionTitle}>{tableConfig.title || "Table"}</Text>
-          {tableConfig.description ? (
-            <Text style={{ fontSize: 9, marginBottom: 4 }}>{tableConfig.description}</Text>
-          ) : null}
-          <TablePdf
-            columns={tableConfig.columns || []}
-            rows={ensureTableRows(tableConfig, tableData, variant)}
-            preFilledData={tableConfig.preFilledData}
-            variant={variant}
-          />
-        </View>
-      )}
-
-      {formType === "mixed" &&
-        sections
-          .slice()
-          .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
-          .map((section) => (
-            <View key={section.id} wrap={false}>
-              <Text style={styles.sectionTitle}>{section.title}</Text>
-              {section.description ? (
-                <Text style={{ fontSize: 9, marginBottom: 4 }}>{section.description}</Text>
-              ) : null}
-              {section.type === "fields" && section.fields && (
-                <View>
-                  {section.fields.map((field) => (
-                    <FieldBlock
-                      key={field.id}
-                      field={field}
-                      variant={variant}
-                      valueOverride={formData[field.name]}
-                    />
-                  ))}
-                </View>
-              )}
-              {section.type === "table" && section.tableConfig && (
-                <TablePdf
-                  columns={section.tableConfig.columns || []}
-                  rows={ensureTableRows(
-                    section.tableConfig,
-                    formData[`table_${section.id}`],
-                    variant
-                  )}
-                  preFilledData={section.tableConfig.preFilledData}
-                  variant={variant}
-                />
-              )}
+      {/* Header */}
+      <View style={s.headerBand}>
+        <View style={s.accentStripe} />
+        <View style={s.headerTopRow}>
+          <View>
+            <Text style={s.headerTitle}>{title || "Form"}</Text>
+            {description && <Text style={s.headerSubtitle}>{description}</Text>}
+          </View>
+          {categoryLabel && (
+            <View style={s.headerBadge}>
+              <Text style={s.headerBadgeText}>{categoryLabel}</Text>
             </View>
-          ))}
+          )}
+        </View>
+      </View>
+
+      {/* Body */}
+      <View style={[s.body, { paddingBottom: 40 }]}>
+        <View style={s.dividerTeal} />
+
+        {/* Regular fields */}
+        {formType === "regular" && (
+          <View>
+            <SectionHeading title="Fields" />
+            {[...fields]
+              .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
+              .map((field) => (
+                <FieldBlock
+                  key={field.id}
+                  field={field}
+                  variant={variant}
+                  valueOverride={formData[field.name]}
+                />
+              ))}
+          </View>
+        )}
+
+        {/* Table form */}
+        {formType === "table" && tableConfig && (
+          <View>
+            <SectionHeading title={tableConfig.title || "Table"} />
+            {tableConfig.description && (
+              <Text style={s.sectionDesc}>{tableConfig.description}</Text>
+            )}
+            <TablePdf
+              columns={tableConfig.columns || []}
+              rows={ensureTableRows(tableConfig, tableData, variant)}
+              preFilledData={tableConfig.preFilledData}
+              variant={variant}
+            />
+          </View>
+        )}
+
+        {/* Mixed form */}
+        {formType === "mixed" &&
+          sections
+            .slice()
+            .sort((a, b) => (a.layout?.order ?? 0) - (b.layout?.order ?? 0))
+            .map((section, idx) => (
+              <View key={section.id} wrap={false}>
+                {idx > 0 && <View style={s.divider} />}
+                <SectionHeading title={section.title} />
+                {section.description && (
+                  <Text style={s.sectionDesc}>{section.description}</Text>
+                )}
+                {section.type === "fields" && section.fields && (
+                  <View>
+                    {section.fields.map((field) => (
+                      <FieldBlock
+                        key={field.id}
+                        field={field}
+                        variant={variant}
+                        valueOverride={formData[field.name]}
+                      />
+                    ))}
+                  </View>
+                )}
+                {section.type === "table" && section.tableConfig && (
+                  <TablePdf
+                    columns={section.tableConfig.columns || []}
+                    rows={ensureTableRows(
+                      section.tableConfig,
+                      formData[`table_${section.id}`],
+                      variant
+                    )}
+                    preFilledData={section.tableConfig.preFilledData}
+                    variant={variant}
+                  />
+                )}
+              </View>
+            ))}
+      </View>
     </>
   );
 };
 
+// ─── Full Document ────────────────────────────────────────────────────────
 const FormTemplatePdfDocument: React.FC<FormTemplatePdfProps> = (props) => (
   <Document>
-    <Page size="A4" style={styles.page}>
+    <Page size="A4" style={s.page}>
       <FormTemplatePdfPageBody {...props} />
+      {/* Footer */}
+      <View style={s.footer} fixed>
+        <Text style={s.footerText}>SENA Ship Management — Confidential</Text>
+        <Text style={s.footerText}>
+          Page <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+        </Text>
+        <Text style={s.footerAccent}>senashipping.com</Text>
+      </View>
     </Page>
   </Document>
 );

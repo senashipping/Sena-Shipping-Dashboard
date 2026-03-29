@@ -266,13 +266,23 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
 
   const exportSubmissionPdf = async () => {
     try {
-      const title = (submission.form?.title || "form").replace(/\s+/g, "-");
-      const id = submission._id ?? submissionId ?? "submission";
-      const short =
-        typeof id === "string" && id.length > 8 ? id.slice(-8) : String(id);
+      const sanitize = (raw: string, fallback: string) => {
+        const s = (raw || fallback)
+          .replace(/[/\\?%*:|"<>]/g, "-")
+          .replace(/\s+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+        return s || fallback;
+      };
+      const formPart = sanitize(String(submission.form?.title || ""), "form");
+      const shipPart = sanitize(
+        submission.ship?.name ? String(submission.ship.name) : "",
+        "No-ship"
+      );
+      const filename = `${formPart}-${shipPart}.pdf`;
       await downloadPdfDocument(
         <SubmissionPdfDocument submission={submission} />,
-        `${title}-submission-${short}.pdf`
+        filename
       );
       toast({ title: "PDF downloaded", variant: "success" });
     } catch (e: unknown) {
