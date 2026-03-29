@@ -153,18 +153,12 @@ function submissionRecordProps(submission: Record<string, any>) {
   };
 }
 
-// ─── Header height constant — must match contHeader style ──────────────────
-// paddingVertical:10 + borderBottom:2 + text line ~14 = ~36pt header
-// + 16pt breathing room below it on every page
-const FORM_HEADER_H = 36;
-const FORM_BODY_TOP_PAD = FORM_HEADER_H + 16;
-
 // ─── Continuation header ───────────────────────────────────────────────────
-// Rendered as fixed inside <Page> so it appears on EVERY overflow page.
-// The body wrapper gets paddingTop: FORM_HEADER_H so content never hides under it.
+// NOT fixed — renders once only. Using fixed=true reserves height on every
+// overflow page which, combined with wrap={false} blocks, creates white gaps.
 function ContinuationHeader({ title, vesselName }: { title?: string; vesselName?: string }) {
   return (
-    <View style={ls.contHeader} fixed>
+    <View style={ls.contHeader}>
       <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
       {vesselName ? (
         <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
@@ -213,13 +207,12 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
       <Document>
         <SubmissionRecordPage {...record} />
         <Page size="A4" style={pdfStyles.page}>
+          {/* Mini header so the page is not headless */}
           <ContinuationHeader
             title={record.formTitle || "Submission Detail"}
             vesselName={record.ship}
           />
-          <View style={{ paddingTop: FORM_BODY_TOP_PAD }}>
-            <FallbackPageBody />
-          </View>
+          <FallbackPageBody />
           <PdfPageFooter />
         </Page>
       </Document>
@@ -232,17 +225,17 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
       {/* Page 1 — Submission record (meta + review section) */}
       <SubmissionRecordPage {...record} />
 
-      {/* Page 2+ — Form body */}
+      {/* Page 2+ — Form body (auto-wraps across as many pages as needed) */}
       <Page size="A4" style={pdfStyles.page}>
-        {/* fixed=true → stamped at top of EVERY page this <Page> flows onto */}
+        {/*
+          ContinuationHeader with fixed=true will be rendered at the top of
+          every page this <Page> flows onto (react-pdf behaviour).
+        */}
         <ContinuationHeader
           title={formProps.title || record.formTitle}
           vesselName={record.ship}
         />
-        {/* paddingTop offsets content below the fixed header + breathing room on all pages */}
-        <View style={{ paddingTop: FORM_BODY_TOP_PAD }}>
-          <FormTemplatePdfPageBody {...formProps} />
-        </View>
+        <FormTemplatePdfPageBody {...formProps} />
         <PdfPageFooter />
       </Page>
     </Document>
