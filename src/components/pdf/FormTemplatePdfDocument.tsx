@@ -6,8 +6,6 @@ import {
   View,
   StyleSheet,
   Image,
-  Line,
-  Svg,
 } from "@react-pdf/renderer";
 import type { FormField, FormSection, TableColumn, TableConfig } from "../../types";
 
