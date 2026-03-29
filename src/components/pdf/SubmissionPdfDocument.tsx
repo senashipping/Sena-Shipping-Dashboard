@@ -170,18 +170,66 @@ function submissionRecordProps(submission: Record<string, any>) {
 }
 
 // ─── Continuation header ───────────────────────────────────────────────────
-/** Repeats at the top of every page this `<Page>` wraps onto. Match `PDF_CONTINUATION_HEADER_RESERVE_PT`. */
-function ContinuationHeader({ title, vesselName }: { title?: string; vesselName?: string }) {
+/** Full-width reserve under the thin bar + gap (only on wrapped continuations; see `ContinuationTopSpacer`). */
+const CONTINUATION_FLOW_CLEAR_PT = PDF_CONTINUATION_HEADER_RESERVE_PT;
+
+/**
+ * Pushes flowing body down on continuation slices of this `<Page>` only (`subPageNumber` > 1).
+ * Omitting this while hiding the thin bar on slice 1 avoids a dead band above the main form header.
+ */
+function ContinuationTopSpacer() {
   return (
-    <View style={ls.contHeaderFixedWrap} fixed>
-      <View style={ls.contHeader}>
-        <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
-        {vesselName ? (
-          <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
-        ) : null}
+    <View
+      render={({ subPageNumber }) =>
+        subPageNumber > 1 ? <View style={{ height: CONTINUATION_FLOW_CLEAR_PT }} /> : null
+      }
+    />
+  );
+}
+
+/** Thin navy strip: every slice of this wrapping page except the first (first form page keeps only the large header). */
+function ContinuationHeader({
+  title,
+  vesselName,
+  showOnFirstSlice = true,
+}: {
+  title?: string;
+  vesselName?: string;
+  /** When false, only render from the 2nd wrapped slice onward (`subPageNumber` > 1). */
+  showOnFirstSlice?: boolean;
+}) {
+  if (showOnFirstSlice) {
+    return (
+      <View style={ls.contHeaderFixedWrap} fixed>
+        <View style={ls.contHeader}>
+          <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
+          {vesselName ? (
+            <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
+          ) : null}
+        </View>
+        <View style={ls.contHeaderAfterGap} />
       </View>
-      <View style={ls.contHeaderAfterGap} />
-    </View>
+    );
+  }
+
+  return (
+    <View
+      style={ls.contHeaderFixedWrap}
+      fixed
+      render={({ subPageNumber }) =>
+        subPageNumber > 1 ? (
+          <View>
+            <View style={ls.contHeader}>
+              <Text style={ls.contHeaderLeft}>{title || "Form"}</Text>
+              {vesselName ? (
+                <Text style={ls.contHeaderRight}>Vessel: {vesselName}</Text>
+              ) : null}
+            </View>
+            <View style={ls.contHeaderAfterGap} />
+          </View>
+        ) : null
+      }
+    />
   );
 }
 
@@ -257,14 +305,16 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
         style={[
           pdfStyles.page,
           {
-            paddingTop: PDF_CONTINUATION_HEADER_RESERVE_PT,
+            paddingTop: 0,
             paddingBottom: PDF_FOOTER_RESERVE_PT,
           },
         ]}
       >
+        <ContinuationTopSpacer />
         <ContinuationHeader
           title={formProps.title || record.formTitle}
           vesselName={record.ship}
+          showOnFirstSlice={false}
         />
         <FormTemplatePdfPageBody {...formProps} />
         <PdfPageFooter />

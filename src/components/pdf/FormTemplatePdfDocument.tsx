@@ -315,9 +315,8 @@ export const PDF_FORM_HEADER_RESERVE_PT = PDF_HEADER_BAND_APPROX_PT + PDF_GAP_AF
 export const PDF_FOOTER_RESERVE_PT = 28;
 
 /**
- * Thin submission continuation bar (`ContinuationHeader` in SubmissionPdfDocument) + gap below it.
- * Used as `Page` `paddingTop` so flowing body clears the bar; the bar itself is `absolute` top 0
- * so it is not pushed down by that padding (see `contHeaderFixedWrap` there).
+ * Height of the thin submission continuation bar + gap below it (`SubmissionPdfDocument`).
+ * Used for flow clearance on continuation slices (`ContinuationTopSpacer`) and fallback `Page` padding.
  */
 export const PDF_CONTINUATION_HEADER_RESERVE_PT = 56;
 
