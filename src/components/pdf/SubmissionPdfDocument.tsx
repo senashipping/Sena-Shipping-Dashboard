@@ -99,9 +99,9 @@ const ls = StyleSheet.create({
     fontSize: 7.5,
     color: "#8eaec9",
   },
-  /** Space after the navy bar (repeats on every page with the fixed header). */
+  /** Space after the navy bar (repeats with the fixed continuation strip). */
   contHeaderAfterGap: {
-    height: 16,
+    height: 20,
     backgroundColor: C.white,
   },
 
@@ -170,23 +170,6 @@ function submissionRecordProps(submission: Record<string, any>) {
 }
 
 // ─── Continuation header ───────────────────────────────────────────────────
-/** Full-width reserve under the thin bar + gap (only on wrapped continuations; see `ContinuationTopSpacer`). */
-const CONTINUATION_FLOW_CLEAR_PT = PDF_CONTINUATION_HEADER_RESERVE_PT;
-
-/**
- * Pushes flowing body down on continuation slices of this `<Page>` only (`subPageNumber` > 1).
- * Omitting this while hiding the thin bar on slice 1 avoids a dead band above the main form header.
- */
-function ContinuationTopSpacer() {
-  return (
-    <View
-      render={({ subPageNumber }) =>
-        subPageNumber > 1 ? <View style={{ height: CONTINUATION_FLOW_CLEAR_PT }} /> : null
-      }
-    />
-  );
-}
-
 /** Thin navy strip: every slice of this wrapping page except the first (first form page keeps only the large header). */
 function ContinuationHeader({
   title,
@@ -305,18 +288,20 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
         style={[
           pdfStyles.page,
           {
-            paddingTop: 0,
+            paddingTop: PDF_CONTINUATION_HEADER_RESERVE_PT,
             paddingBottom: PDF_FOOTER_RESERVE_PT,
           },
         ]}
       >
-        <ContinuationTopSpacer />
         <ContinuationHeader
           title={formProps.title || record.formTitle}
           vesselName={record.ship}
           showOnFirstSlice={false}
         />
-        <FormTemplatePdfPageBody {...formProps} />
+        <FormTemplatePdfPageBody
+          {...formProps}
+          pullUpTopReservePt={PDF_CONTINUATION_HEADER_RESERVE_PT}
+        />
         <PdfPageFooter />
       </Page>
     </Document>

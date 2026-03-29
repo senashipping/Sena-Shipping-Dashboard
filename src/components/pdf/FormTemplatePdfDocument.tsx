@@ -316,9 +316,10 @@ export const PDF_FOOTER_RESERVE_PT = 28;
 
 /**
  * Height of the thin submission continuation bar + gap below it (`SubmissionPdfDocument`).
- * Used for flow clearance on continuation slices (`ContinuationTopSpacer`) and fallback `Page` padding.
+ * Use as `Page` `paddingTop` so flow clears the fixed strip on every wrapped page; pair with
+ * `pullUpTopReservePt` on `FormTemplatePdfPageBody` so the first form slice is not double-indented.
  */
-export const PDF_CONTINUATION_HEADER_RESERVE_PT = 56;
+export const PDF_CONTINUATION_HEADER_RESERVE_PT = 58;
 
 export interface FormTemplatePdfProps {
   title: string;
@@ -339,6 +340,12 @@ export interface FormTemplatePdfProps {
   internalFixedHeader?: boolean;
   /** When `internalFixedHeader` is true, omit long description from the fixed band (shown in flowing body). */
   omitDescriptionInFixedHeader?: boolean;
+  /**
+   * With submission PDF `Page` `paddingTop` = `PDF_CONTINUATION_HEADER_RESERVE_PT`, set this to the same value
+   * so the first form slice pulls up and the large header still starts at the top; continuation slices reset
+   * margin in the layout engine so clearance still applies.
+   */
+  pullUpTopReservePt?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -672,6 +679,7 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
     omitHeader,
     internalFixedHeader,
     omitDescriptionInFixedHeader,
+    pullUpTopReservePt,
     title,
     description,
     documentSubtitle,
@@ -685,7 +693,7 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
     variant,
   } = props;
 
-  return (
+  const inner = (
     <>
       {omitHeader && internalFixedHeader ? (
         <FormTemplatePdfFixedHeader
@@ -799,6 +807,12 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
       </View>
     </>
   );
+
+  if (pullUpTopReservePt) {
+    return <View style={{ marginTop: -pullUpTopReservePt }}>{inner}</View>;
+  }
+
+  return inner;
 };
 
 // ─── Full Document ────────────────────────────────────────────────────────
