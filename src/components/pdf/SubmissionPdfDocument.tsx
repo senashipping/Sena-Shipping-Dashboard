@@ -1,7 +1,10 @@
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import {
+  FormTemplatePdfFixedHeader,
   FormTemplatePdfPageBody,
+  PDF_FOOTER_RESERVE_PT,
+  PDF_FORM_HEADER_RESERVE_PT,
   PdfPageFooter,
   SubmissionRecordPage,
   pdfStyles,
@@ -150,20 +153,27 @@ export interface SubmissionPdfDocumentProps {
 
 /**
  * PDF wiring:
- * - Page 1: `SubmissionRecordPage` from FormTemplatePdfDocument (branded cover + review).
- * - Page 2+: One `<Page>` containing `FormTemplatePdfPageBody` (full form header + fields). Content
- *   that overflows becomes additional PDF pages; `PdfPageFooter` is fixed and repeats with page numbers.
- * - If `submissionToFormTemplatePdfProps` returns null, page 2 is the styled fallback notice only.
+ * - Page 1: `SubmissionRecordPage` (cover + review).
+ * - Form section: one `<Page>` with `paddingTop`/`paddingBottom` so flow does not sit under fixed
+ *   `FormTemplatePdfFixedHeader` / `PdfPageFooter`; header + footer repeat on every printed page.
  */
 const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submission }) => {
   const formProps = submissionToFormTemplatePdfProps(submission);
   const record = submissionRecordProps(submission);
 
+  const formPageStyle = [
+    pdfStyles.page,
+    {
+      paddingTop: PDF_FORM_HEADER_RESERVE_PT,
+      paddingBottom: PDF_FOOTER_RESERVE_PT,
+    },
+  ];
+
   if (!formProps) {
     return (
       <Document>
         <SubmissionRecordPage {...record} />
-        <Page size="A4" style={pdfStyles.page}>
+        <Page size="A4" style={[pdfStyles.page, { paddingBottom: PDF_FOOTER_RESERVE_PT }]}>
           <FallbackPageBody />
           <PdfPageFooter />
         </Page>
@@ -174,8 +184,14 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
   return (
     <Document>
       <SubmissionRecordPage {...record} />
-      <Page size="A4" style={pdfStyles.page}>
-        <FormTemplatePdfPageBody {...formProps} />
+      <Page size="A4" style={formPageStyle}>
+        <FormTemplatePdfFixedHeader
+          title={formProps.title}
+          description={formProps.description}
+          documentSubtitle={formProps.documentSubtitle}
+          categoryLabel={formProps.categoryLabel}
+        />
+        <FormTemplatePdfPageBody {...formProps} omitHeader />
         <PdfPageFooter />
       </Page>
     </Document>

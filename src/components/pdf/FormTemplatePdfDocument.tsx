@@ -301,6 +301,11 @@ const s = StyleSheet.create({
 // ─── Types ────────────────────────────────────────────────────────────────
 export type FormTemplatePdfVariant = "blank" | "filled";
 
+/** Match visual height of `headerBand` for Page paddingTop when using `FormTemplatePdfFixedHeader`. */
+export const PDF_FORM_HEADER_RESERVE_PT = 132;
+/** Page paddingBottom so flowing content does not sit under the fixed footer. */
+export const PDF_FOOTER_RESERVE_PT = 36;
+
 export interface FormTemplatePdfProps {
   title: string;
   description?: string;
@@ -314,6 +319,8 @@ export interface FormTemplatePdfProps {
   formData?: Record<string, any>;
   tableData?: any[];
   variant: FormTemplatePdfVariant;
+  /** When true, header is omitted (use with `FormTemplatePdfFixedHeader` on the same Page). */
+  omitHeader?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -470,6 +477,31 @@ export const PdfPageFooter: React.FC = () => (
   </View>
 );
 
+/** Repeats on every printed page (use with Page paddingTop ≈ PDF_FORM_HEADER_RESERVE_PT). */
+export const FormTemplatePdfFixedHeader: React.FC<
+  Pick<FormTemplatePdfProps, "title" | "description" | "documentSubtitle" | "categoryLabel">
+> = ({ title, description, documentSubtitle, categoryLabel }) => (
+  <View style={s.headerBand} fixed>
+    <View style={s.accentStripe} />
+    <View style={s.headerBandStack}>
+      <View style={s.headerTitleBlock}>
+        <Text style={s.headerTitle}>{title || "Form"}</Text>
+        {documentSubtitle ? (
+          <Text style={s.headerSubtitle}>Vessel: {documentSubtitle}</Text>
+        ) : null}
+        {description ? <Text style={s.headerSubtitle}>{description}</Text> : null}
+      </View>
+      {categoryLabel ? (
+        <View style={s.headerCategoryRow}>
+          <View style={s.headerBadge}>
+            <Text style={s.headerBadgeText}>{categoryLabel}</Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  </View>
+);
+
 // ─── Page 1: Submission Record ────────────────────────────────────────────
 interface SubmissionRecordProps {
   submittedBy?: string;
@@ -499,7 +531,7 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
   const st = statusStyle(statusLabel || status);
   const badgeText = statusLabel || status || "\u2014";
   return (
-    <Page size="A4" style={s.page}>
+    <Page size="A4" style={[s.page, { paddingBottom: PDF_FOOTER_RESERVE_PT }]}>
       {/* Header */}
       <View style={s.headerBand}>
         <View style={s.accentStripe} />
@@ -616,6 +648,7 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
 // ─── Page 2+: Form Body ───────────────────────────────────────────────────
 export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) => {
   const {
+    omitHeader,
     title,
     description,
     documentSubtitle,
@@ -631,26 +664,27 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
 
   return (
     <>
-      {/* Header */}
-      <View style={s.headerBand}>
-        <View style={s.accentStripe} />
-        <View style={s.headerBandStack}>
-          <View style={s.headerTitleBlock}>
-            <Text style={s.headerTitle}>{title || "Form"}</Text>
-            {documentSubtitle ? (
-              <Text style={s.headerSubtitle}>Vessel: {documentSubtitle}</Text>
-            ) : null}
-            {description ? <Text style={s.headerSubtitle}>{description}</Text> : null}
-          </View>
-          {categoryLabel ? (
-            <View style={s.headerCategoryRow}>
-              <View style={s.headerBadge}>
-                <Text style={s.headerBadgeText}>{categoryLabel}</Text>
-              </View>
+      {!omitHeader ? (
+        <View style={s.headerBand}>
+          <View style={s.accentStripe} />
+          <View style={s.headerBandStack}>
+            <View style={s.headerTitleBlock}>
+              <Text style={s.headerTitle}>{title || "Form"}</Text>
+              {documentSubtitle ? (
+                <Text style={s.headerSubtitle}>Vessel: {documentSubtitle}</Text>
+              ) : null}
+              {description ? <Text style={s.headerSubtitle}>{description}</Text> : null}
             </View>
-          ) : null}
+            {categoryLabel ? (
+              <View style={s.headerCategoryRow}>
+                <View style={s.headerBadge}>
+                  <Text style={s.headerBadgeText}>{categoryLabel}</Text>
+                </View>
+              </View>
+            ) : null}
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {/* Body */}
       <View style={[s.body, { paddingBottom: 40 }]}>
@@ -735,7 +769,7 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
 // ─── Full Document ────────────────────────────────────────────────────────
 const FormTemplatePdfDocument: React.FC<FormTemplatePdfProps> = (props) => (
   <Document>
-    <Page size="A4" style={s.page}>
+    <Page size="A4" style={[s.page, { paddingBottom: PDF_FOOTER_RESERVE_PT }]}>
       <FormTemplatePdfPageBody {...props} />
       <PdfPageFooter />
     </Page>
