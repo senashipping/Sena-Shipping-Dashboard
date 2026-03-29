@@ -1,5 +1,5 @@
 import React from "react";
-import { Document, Page, Text, View } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import {
   FormTemplatePdfPageBody,
   PdfPageFooter,
@@ -8,6 +8,69 @@ import {
 } from "./FormTemplatePdfDocument";
 import { submissionToFormTemplatePdfProps } from "./submissionToFormTemplatePdfProps";
 import { formatDateTime } from "../../lib/utils";
+
+// ─── Colour tokens (aligned with FormTemplatePdfDocument) ───────────────────
+const C = {
+  navy: "#0f2341",
+  teal: "#0d7fa5",
+  tealLight: "#e6f4f9",
+  tealBorder: "#7ac8df",
+  silver: "#f4f6f8",
+  border: "#cdd5dc",
+  text: "#1e2a38",
+  muted: "#5a6a7a",
+  white: "#ffffff",
+};
+
+// ─── Local styles (fallback page only) ─────────────────────────────────────
+const ls = StyleSheet.create({
+  fallbackBody: {
+    paddingHorizontal: 36,
+    paddingTop: 24,
+    paddingBottom: 48,
+  },
+  fallbackCard: {
+    borderWidth: 1,
+    borderColor: C.tealBorder,
+    borderRadius: 4,
+    backgroundColor: C.tealLight,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  fallbackIconWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: C.teal,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  fallbackIcon: {
+    fontSize: 11,
+    color: C.white,
+    fontFamily: "Helvetica-Bold",
+  },
+  fallbackText: {
+    fontSize: 9,
+    color: C.muted,
+    lineHeight: 1.5,
+    flex: 1,
+  },
+  fallbackTitle: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+    color: C.navy,
+    marginBottom: 4,
+  },
+  tealRule: {
+    height: 2,
+    backgroundColor: C.teal,
+    marginBottom: 14,
+  },
+});
 
 function submissionStatusLine(submission: {
   status?: string;
@@ -39,11 +102,7 @@ function formatSubmittedBy(submission: Record<string, any>): string | undefined 
   return undefined;
 }
 
-export interface SubmissionPdfDocumentProps {
-  submission: Record<string, any>;
-}
-
-const submissionRecordProps = (submission: Record<string, any>) => {
+function submissionRecordProps(submission: Record<string, any>) {
   const statusLabel = submissionStatusLine(submission);
   const reviewedByStr =
     submission.reviewedBy?.name ||
@@ -61,8 +120,41 @@ const submissionRecordProps = (submission: Record<string, any>) => {
     reviewedAt: submission.reviewedAt ? formatDateTime(submission.reviewedAt) : undefined,
     reviewComments: submission.reviewComments ? String(submission.reviewComments) : undefined,
   };
-};
+}
 
+function FallbackPageBody() {
+  return (
+    <View style={ls.fallbackBody}>
+      <View style={ls.tealRule} />
+      <View style={ls.fallbackCard}>
+        <View style={ls.fallbackIconWrap}>
+          <Text style={ls.fallbackIcon}>!</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={ls.fallbackTitle}>Form definition unavailable</Text>
+          <Text style={ls.fallbackText}>
+            The form definition associated with this submission could not be retrieved. The submission
+            record above reflects all metadata captured at the time of filing. Please contact your system
+            administrator or refer to the original form entry in the SENA Ship Management platform for full
+            field details.
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+export interface SubmissionPdfDocumentProps {
+  submission: Record<string, any>;
+}
+
+/**
+ * PDF wiring:
+ * - Page 1: `SubmissionRecordPage` from FormTemplatePdfDocument (branded cover + review).
+ * - Page 2+: One `<Page>` containing `FormTemplatePdfPageBody` (full form header + fields). Content
+ *   that overflows becomes additional PDF pages; `PdfPageFooter` is fixed and repeats with page numbers.
+ * - If `submissionToFormTemplatePdfProps` returns null, page 2 is the styled fallback notice only.
+ */
 const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submission }) => {
   const formProps = submissionToFormTemplatePdfProps(submission);
   const record = submissionRecordProps(submission);
@@ -72,11 +164,7 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
       <Document>
         <SubmissionRecordPage {...record} />
         <Page size="A4" style={pdfStyles.page}>
-          <View style={{ paddingHorizontal: 36, paddingTop: 20, paddingBottom: 40 }}>
-            <Text style={{ fontSize: 10, color: "#5a6a7a" }}>
-              Form definition was not available for this submission.
-            </Text>
-          </View>
+          <FallbackPageBody />
           <PdfPageFooter />
         </Page>
       </Document>
