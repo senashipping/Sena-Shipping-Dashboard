@@ -96,11 +96,11 @@ const s = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  // ── Body wrapper (paddingBottom clears fixed footer; do not set maxHeight — it squishes fields) ──
+  // ── Body wrapper (bottom clearance comes mainly from Page `paddingBottom`; keep this modest) ──
   body: {
     paddingHorizontal: 36,
-    paddingTop: 20,
-    paddingBottom: 44,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
 
   // ── Meta cards row ──
@@ -301,10 +301,10 @@ const s = StyleSheet.create({
 // ─── Types ────────────────────────────────────────────────────────────────
 export type FormTemplatePdfVariant = "blank" | "filled";
 
-/** Match visual height of `headerBand` for Page paddingTop when using `FormTemplatePdfFixedHeader`. */
-export const PDF_FORM_HEADER_RESERVE_PT = 132;
-/** Page paddingBottom so flowing content does not sit under the fixed footer. */
-export const PDF_FOOTER_RESERVE_PT = 36;
+/** Space below fixed header so flow text starts under the band (tune if title wraps to 3+ lines). */
+export const PDF_FORM_HEADER_RESERVE_PT = 108;
+/** Space above bottom so flow does not draw under fixed footer (footer bar is 28pt + small buffer). */
+export const PDF_FOOTER_RESERVE_PT = 38;
 
 export interface FormTemplatePdfProps {
   title: string;
@@ -549,7 +549,7 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
       </View>
 
       {/* Body */}
-      <View style={[s.body, { paddingBottom: 40 }]}>
+      <View style={s.body}>
         <View style={s.dividerTeal} />
 
         {/* Meta cards */}
@@ -687,7 +687,7 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
       ) : null}
 
       {/* Body */}
-      <View style={[s.body, { paddingBottom: 40 }]}>
+      <View style={s.body}>
         <View style={s.dividerTeal} />
 
         {/* Regular fields */}

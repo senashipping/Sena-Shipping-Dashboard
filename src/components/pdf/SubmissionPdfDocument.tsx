@@ -154,8 +154,7 @@ export interface SubmissionPdfDocumentProps {
 /**
  * PDF wiring:
  * - Page 1: `SubmissionRecordPage` (cover + review).
- * - Form section: one `<Page>` with `paddingTop`/`paddingBottom` so flow does not sit under fixed
- *   `FormTemplatePdfFixedHeader` / `PdfPageFooter`; header + footer repeat on every printed page.
+ * - Form section: fixed header/footer + `Page` padding so text clears both (see `PDF_*_RESERVE_PT`).
  */
 const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submission }) => {
   const formProps = submissionToFormTemplatePdfProps(submission);
