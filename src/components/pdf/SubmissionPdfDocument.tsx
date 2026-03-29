@@ -1,7 +1,6 @@
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import {
-  FormTemplatePdfFixedHeader,
   FormTemplatePdfPageBody,
   PDF_FOOTER_RESERVE_PT,
   PDF_FORM_HEADER_RESERVE_PT,
@@ -184,14 +183,12 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
     <Document>
       <SubmissionRecordPage {...record} />
       <Page size="A4" style={formPageStyle}>
-        <FormTemplatePdfFixedHeader
-          title={formProps.title}
-          description={formProps.description}
-          documentSubtitle={formProps.documentSubtitle}
-          categoryLabel={formProps.categoryLabel}
-          omitDescription
+        <FormTemplatePdfPageBody
+          {...formProps}
+          omitHeader
+          internalFixedHeader
+          omitDescriptionInFixedHeader
         />
-        <FormTemplatePdfPageBody {...formProps} omitHeader />
         <PdfPageFooter />
       </Page>
     </Document>

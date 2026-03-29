@@ -327,8 +327,12 @@ export interface FormTemplatePdfProps {
   formData?: Record<string, any>;
   tableData?: any[];
   variant: FormTemplatePdfVariant;
-  /** When true, header is omitted (use with `FormTemplatePdfFixedHeader` on the same Page). */
+  /** When true, the inline navy header band is omitted (use with `internalFixedHeader` or an external fixed header). */
   omitHeader?: boolean;
+  /** With `omitHeader`, render `FormTemplatePdfFixedHeader` (fixed) as the first child inside this body instead of beside `<Page>`. */
+  internalFixedHeader?: boolean;
+  /** When `internalFixedHeader` is true, omit long description from the fixed band (shown in flowing body). */
+  omitDescriptionInFixedHeader?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -381,7 +385,7 @@ function FieldBlock({
   const isFilled = variant === "filled" && text && text !== "\u2014";
 
   return (
-    <View wrap style={{ marginBottom: 12 }}>
+    <View style={{ marginBottom: 12 }} wrap={field.type === "signature" ? false : undefined}>
       <Text style={s.fieldLabel}>
         {field.label}
         {field.required ? " *" : ""}
@@ -660,6 +664,8 @@ export const SubmissionRecordPage: React.FC<SubmissionRecordProps> = ({
 export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) => {
   const {
     omitHeader,
+    internalFixedHeader,
+    omitDescriptionInFixedHeader,
     title,
     description,
     documentSubtitle,
@@ -675,6 +681,15 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
 
   return (
     <>
+      {omitHeader && internalFixedHeader ? (
+        <FormTemplatePdfFixedHeader
+          title={title}
+          description={description}
+          documentSubtitle={documentSubtitle}
+          categoryLabel={categoryLabel}
+          omitDescription={omitDescriptionInFixedHeader}
+        />
+      ) : null}
       {!omitHeader ? (
         <View style={s.headerBand}>
           <View style={s.accentStripe} />
