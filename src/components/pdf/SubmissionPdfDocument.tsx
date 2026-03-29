@@ -189,6 +189,7 @@ const SubmissionPdfDocument: React.FC<SubmissionPdfDocumentProps> = ({ submissio
           description={formProps.description}
           documentSubtitle={formProps.documentSubtitle}
           categoryLabel={formProps.categoryLabel}
+          omitDescription
         />
         <FormTemplatePdfPageBody {...formProps} omitHeader />
         <PdfPageFooter />

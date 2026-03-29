@@ -96,11 +96,11 @@ const s = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  // ── Body wrapper (bottom clearance comes mainly from Page `paddingBottom`; keep this modest) ──
+  // ── Body wrapper (vertical inset mostly from Page padding; keep this small to avoid double gaps) ──
   body: {
     paddingHorizontal: 36,
-    paddingTop: 12,
-    paddingBottom: 12,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
 
   // ── Meta cards row ──
@@ -162,7 +162,8 @@ const s = StyleSheet.create({
   dividerTeal: {
     height: 2,
     backgroundColor: C.teal,
-    marginBottom: 14,
+    marginBottom: 10,
+    marginTop: 4,
   },
 
   // ── Section heading ──
@@ -301,10 +302,17 @@ const s = StyleSheet.create({
 // ─── Types ────────────────────────────────────────────────────────────────
 export type FormTemplatePdfVariant = "blank" | "filled";
 
-/** Space below fixed header so flow text starts under the band (tune if title wraps to 3+ lines). */
-export const PDF_FORM_HEADER_RESERVE_PT = 108;
-/** Space above bottom so flow does not draw under fixed footer (footer bar is 28pt + small buffer). */
-export const PDF_FOOTER_RESERVE_PT = 38;
+/**
+ * Approximate painted height of `FormTemplatePdfFixedHeader` without long description lines
+ * (submission PDFs pass `omitDescription` so the band stays compact; tune up if titles wrap heavily).
+ */
+export const PDF_HEADER_BAND_APPROX_PT = 78;
+/** Space between header bottom and flowing text (applies on every page, including continuations). */
+export const PDF_GAP_AFTER_HEADER_PT = 20;
+/** Flow inset from top = band + gap — match real header height to avoid a white strip under the band. */
+export const PDF_FORM_HEADER_RESERVE_PT = PDF_HEADER_BAND_APPROX_PT + PDF_GAP_AFTER_HEADER_PT;
+/** Match fixed footer height (28pt); extra padding here only adds blank space above the footer. */
+export const PDF_FOOTER_RESERVE_PT = 28;
 
 export interface FormTemplatePdfProps {
   title: string;
@@ -479,8 +487,11 @@ export const PdfPageFooter: React.FC = () => (
 
 /** Repeats on every printed page (use with Page paddingTop ≈ PDF_FORM_HEADER_RESERVE_PT). */
 export const FormTemplatePdfFixedHeader: React.FC<
-  Pick<FormTemplatePdfProps, "title" | "description" | "documentSubtitle" | "categoryLabel">
-> = ({ title, description, documentSubtitle, categoryLabel }) => (
+  Pick<FormTemplatePdfProps, "title" | "description" | "documentSubtitle" | "categoryLabel"> & {
+    /** When set with `FormTemplatePdfPageBody` + `omitHeader`, render `description` in the body instead (shorter fixed band). */
+    omitDescription?: boolean;
+  }
+> = ({ title, description, documentSubtitle, categoryLabel, omitDescription }) => (
   <View style={s.headerBand} fixed>
     <View style={s.accentStripe} />
     <View style={s.headerBandStack}>
@@ -489,7 +500,7 @@ export const FormTemplatePdfFixedHeader: React.FC<
         {documentSubtitle ? (
           <Text style={s.headerSubtitle}>Vessel: {documentSubtitle}</Text>
         ) : null}
-        {description ? <Text style={s.headerSubtitle}>{description}</Text> : null}
+        {description && !omitDescription ? <Text style={s.headerSubtitle}>{description}</Text> : null}
       </View>
       {categoryLabel ? (
         <View style={s.headerCategoryRow}>
@@ -688,6 +699,9 @@ export const FormTemplatePdfPageBody: React.FC<FormTemplatePdfProps> = (props) =
 
       {/* Body */}
       <View style={s.body}>
+        {omitHeader && description ? (
+          <Text style={[s.headerSubtitle, { color: C.muted, marginBottom: 8 }]}>{description}</Text>
+        ) : null}
         <View style={s.dividerTeal} />
 
         {/* Regular fields */}
