@@ -294,7 +294,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl max-h-[90vh]">
-        <DialogHeader className="flex flex-col gap-9 sm:flex-row sm:items-start sm:justify-start sm:space-y-0">
+        <DialogHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-start sm:space-y-0 sm:gap-4">
           <div className="space-y-1.5">
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5" />
