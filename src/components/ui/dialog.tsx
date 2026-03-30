@@ -40,14 +40,12 @@ const DialogContent = React.forwardRef<
       )}
       {...props}
     >
-      <div className="flex justify-end">
-        <DialogPrimitive.Close
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-dark-danger text-white transition-colors hover:bg-dark-danger/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
-        >
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      </div>
+      <DialogPrimitive.Close
+        className="ml-auto -mb-8 inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-700 text-white transition-colors hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
+      >
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
       {children}
     </DialogPrimitive.Content>
   </DialogPortal>
