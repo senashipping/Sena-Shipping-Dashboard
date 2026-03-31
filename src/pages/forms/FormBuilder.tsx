@@ -21,7 +21,7 @@ import { Label } from "../../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../../components/ui/dialog";
 
-import { ArrowLeft, Eye, Save, Undo, Redo } from "lucide-react";
+import { ArrowLeft, Eye, Save, Undo, Redo, Plus } from "lucide-react";
 import { FormField, FormSection, TableConfig, Category, FieldTemplate, FormLayout } from "../../types";
 import FieldPalette from "../../components/form-builder/FieldPalette";
 import FormCanvas from "../../components/form-builder/FormCanvas";
@@ -159,6 +159,64 @@ const FormBuilder: React.FC = () => {
     // Store the dragged item data for potential use
   };
 
+  const addFieldToMixedSection = (newField: FormField, preferredSectionId?: string) => {
+    const preferredSectionIndex = preferredSectionId
+      ? formState.sections.findIndex(s => s.id === preferredSectionId && s.type === "fields")
+      : -1;
+
+    if (preferredSectionIndex !== -1) {
+      const sectionsCopy = [...formState.sections];
+      const target = sectionsCopy[preferredSectionIndex];
+      sectionsCopy[preferredSectionIndex] = {
+        ...target,
+        fields: [...(target.fields || []), newField],
+      };
+      updateFormState({ sections: sectionsCopy });
+      return;
+    }
+
+    const selectedSectionIndex =
+      selectedItem?.type === "section"
+        ? formState.sections.findIndex(s => s.id === selectedItem.id && s.type === "fields")
+        : -1;
+
+    if (selectedSectionIndex !== -1) {
+      const sectionsCopy = [...formState.sections];
+      const target = sectionsCopy[selectedSectionIndex];
+      sectionsCopy[selectedSectionIndex] = {
+        ...target,
+        fields: [...(target.fields || []), newField],
+      };
+      updateFormState({ sections: sectionsCopy });
+      return;
+    }
+
+    // Fallback: append to the last fields section, or create one if none exists
+    const lastFieldsSectionIndex = formState.sections.map((s, i) => ({ s, i })).filter(({ s }) => s.type === "fields").pop()?.i;
+    if (lastFieldsSectionIndex === undefined) {
+      const defaultSection: FormSection = {
+        id: uuidv4(),
+        name: `section_${Date.now()}`,
+        title: `Section ${formState.sections.length + 1}`,
+        type: "fields",
+        fields: [newField],
+        layout: { order: formState.sections.length, columnsPerRow: 1 },
+      };
+      updateFormState({
+        sections: [...formState.sections, defaultSection],
+      });
+      return;
+    }
+
+    const sectionsCopy = [...formState.sections];
+    const target = sectionsCopy[lastFieldsSectionIndex];
+    sectionsCopy[lastFieldsSectionIndex] = {
+      ...target,
+      fields: [...(target.fields || []), newField],
+    };
+    updateFormState({ sections: sectionsCopy });
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     
@@ -199,32 +257,8 @@ const FormBuilder: React.FC = () => {
             fields: newFields
           });
         } else if (formState.formType === "mixed") {
-          // Find the last fields-type section or create a new one
-          const lastFieldsSectionIndex = formState.sections.map((s, i) => ({ s, i })).filter(({ s }) => s.type === "fields").pop()?.i;
-          
-          if (lastFieldsSectionIndex === undefined) {
-            // No fields section exists, create a new one
-            const defaultSection: FormSection = {
-              id: uuidv4(),
-              name: `section_${Date.now()}`,
-              title: `Section ${formState.sections.length + 1}`,
-              type: "fields",
-              fields: [newField],
-              layout: { order: formState.sections.length, columnsPerRow: 1 },
-            };
-            updateFormState({
-              sections: [...formState.sections, defaultSection]
-            });
-          } else {
-            // Add to the last fields-type section
-            const sectionsCopy = [...formState.sections];
-            const target = sectionsCopy[lastFieldsSectionIndex];
-            sectionsCopy[lastFieldsSectionIndex] = {
-              ...target,
-              fields: [...(target.fields || []), newField]
-            };
-            updateFormState({ sections: sectionsCopy });
-          }
+          const targetSectionId = over.id !== "form-canvas" ? String(over.id) : undefined;
+          addFieldToMixedSection(newField, targetSectionId);
         }
       } else if (active.data.current?.type === "table") {
         // Handle table section drop
@@ -307,30 +341,7 @@ const FormBuilder: React.FC = () => {
     if (formState.formType === "regular") {
       updateFormState({ fields: [...formState.fields, newField] });
     } else if (formState.formType === "mixed") {
-      // Append to last fields-type section or create one if none
-      const lastFieldsSectionIndex = [...formState.sections].reverse().findIndex(s => s.type === "fields");
-      if (lastFieldsSectionIndex === -1) {
-        const defaultSection: FormSection = {
-          id: uuidv4(),
-          name: "section_1",
-          title: "Section 1",
-          type: "fields",
-          fields: [newField],
-          layout: { order: 0, columnsPerRow: 1 },
-        };
-        updateFormState({ sections: [...formState.sections, defaultSection] });
-      } else {
-        const indexFromStart = formState.sections.length - 1 - lastFieldsSectionIndex;
-        const sectionsCopy = [...formState.sections];
-        const target = sectionsCopy[indexFromStart];
-        if (target.type === "fields") {
-          sectionsCopy[indexFromStart] = {
-            ...target,
-            fields: [...(target.fields || []), newField]
-          };
-        }
-        updateFormState({ sections: sectionsCopy });
-      }
+      addFieldToMixedSection(newField);
     }
   };
 
@@ -372,6 +383,22 @@ const FormBuilder: React.FC = () => {
       };
       updateFormState({ sections: [...formState.sections, newSection] });
     }
+  };
+
+  // Add an empty fields section (useful for mixed form composition)
+  const handleAddMixedSection = () => {
+    if (formState.formType !== "mixed") return;
+
+    const newSection: FormSection = {
+      id: uuidv4(),
+      name: `section_${Date.now()}`,
+      title: `Section ${formState.sections.length + 1}`,
+      type: "fields",
+      fields: [],
+      layout: { order: formState.sections.length, columnsPerRow: 1 },
+    };
+
+    updateFormState({ sections: [...formState.sections, newSection] });
   };
 
   const handleUpdateField = (fieldId: string, updates: Partial<FormField>) => {
@@ -837,7 +864,15 @@ const FormBuilder: React.FC = () => {
               {/* Form Canvas */}
               <Card className="border-sena-lightBlue/20 dark:border-gray-700 dark:bg-sena-darkCard">
                 <CardHeader>
-                  <CardTitle className="text-sena-navy dark:text-white">Form Builder</CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-sena-navy dark:text-white">Form Builder</CardTitle>
+                    {formState.formType === "mixed" && (
+                      <Button type="button" variant="outline" size="sm" onClick={handleAddMixedSection}>
+                        <Plus className="w-4 h-4 mr-1" />
+                        Add Section
+                      </Button>
+                    )}
+                  </div>
                   <CardDescription className="text-sena-lightBlue dark:text-white/90">
                     Drag and drop elements {window.innerWidth >= 1024 ? 'from the left panel' : 'using the Add Fields button'} to build your form
                   </CardDescription>
