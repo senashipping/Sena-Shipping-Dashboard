@@ -43,6 +43,7 @@ interface FormBuilderState {
 interface FormValidationErrors {
   title?: string;
   category?: string;
+  validityPeriod?: string;
 }
 
 const ALLOWED_FIELD_TYPES = new Set([
@@ -615,15 +616,20 @@ const FormBuilder: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent | React.MouseEvent) => {
     e.preventDefault();
 
     const nextValidationErrors: FormValidationErrors = {};
     if (!formState.title.trim()) {
       nextValidationErrors.title = "Form name is required.";
+    } else if (formState.title.trim().length < 2) {
+      nextValidationErrors.title = "Form name must be at least 2 characters.";
     }
     if (!formState.category) {
       nextValidationErrors.category = "Form category is required.";
+    }
+    if (!Number.isFinite(formState.validityPeriod) || formState.validityPeriod < 1 || formState.validityPeriod > 365) {
+      nextValidationErrors.validityPeriod = "Validity period must be between 1 and 365 days.";
     }
 
     if (Object.keys(nextValidationErrors).length > 0) {
@@ -671,6 +677,13 @@ const FormBuilder: React.FC = () => {
   };
 
   const error = createMutation.error || updateMutation.error;
+  const serverErrorMessage =
+    (error as any)?.response?.data?.message ||
+    (error as any)?.message ||
+    "An error occurred while saving the form.";
+  const serverErrorDetails = Array.isArray((error as any)?.response?.data?.errors)
+    ? (error as any).response.data.errors
+    : [];
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-sena-darkBg">
@@ -735,7 +748,7 @@ const FormBuilder: React.FC = () => {
                 </Dialog>
                 <Button 
                   onClick={handleSubmit} 
-                  disabled={createMutation.isLoading || updateMutation.isLoading}
+                  disabled={createMutation.isPending || updateMutation.isPending}
                   size="sm"
                   className="text-xs sm:text-sm"
                 >
@@ -749,11 +762,11 @@ const FormBuilder: React.FC = () => {
             {!!error && (
               <div className="p-3 mt-4 text-red-700 bg-red-100 border border-red-400 rounded">
                 <div className="font-semibold">
-                  {(error as any)?.response?.data?.message || "An error occurred while saving the form."}
+                  {serverErrorMessage}
                 </div>
-                {(error as any)?.response?.data?.errors && Array.isArray((error as any).response.data.errors) && (error as any).response.data.errors.length > 0 && (
+                {serverErrorDetails.length > 0 && (
                   <ul className="mt-2 list-disc list-inside">
-                    {(error as any).response.data.errors.map((err: { field?: string; message: string }, index: number) => (
+                    {serverErrorDetails.map((err: { field?: string; message: string }, index: number) => (
                       <li key={index} className="text-sm">
                         {err.field ? `${err.field}: ` : ""}{err.message}
                       </li>
@@ -849,6 +862,15 @@ const FormBuilder: React.FC = () => {
                       )}
                     </div>
                   </div>
+                  {(validationErrors.title || validationErrors.category || validationErrors.validityPeriod) && (
+                    <div className="p-3 text-red-700 bg-red-50 border border-red-200 rounded">
+                      <ul className="space-y-1 text-sm list-disc list-inside">
+                        {validationErrors.title && <li>{validationErrors.title}</li>}
+                        {validationErrors.category && <li>{validationErrors.category}</li>}
+                        {validationErrors.validityPeriod && <li>{validationErrors.validityPeriod}</li>}
+                      </ul>
+                    </div>
+                  )}
 
                   <div>
                     <Label htmlFor="description" className="text-sena-navy dark:text-white">Description</Label>
@@ -893,10 +915,25 @@ const FormBuilder: React.FC = () => {
                         min="1"
                         max="365"
                         value={formState.validityPeriod}
-                        onChange={(e) => updateFormState({ validityPeriod: parseInt(e.target.value) })}
+                        onChange={(e) => {
+                          updateFormState({ validityPeriod: parseInt(e.target.value) });
+                          const parsed = parseInt(e.target.value);
+                          if (
+                            validationErrors.validityPeriod &&
+                            Number.isFinite(parsed) &&
+                            parsed >= 1 &&
+                            parsed <= 365
+                          ) {
+                            setValidationErrors((prev) => ({ ...prev, validityPeriod: undefined }));
+                          }
+                        }}
                         required
+                        aria-invalid={!!validationErrors.validityPeriod}
                         className="border-sena-lightBlue/30 focus:border-sena-gold focus:ring-sena-gold/20"
                       />
+                      {validationErrors.validityPeriod && (
+                        <p className="mt-1 text-sm text-red-600">{validationErrors.validityPeriod}</p>
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="theme" className="text-sena-navy dark:text-white">Theme</Label>
