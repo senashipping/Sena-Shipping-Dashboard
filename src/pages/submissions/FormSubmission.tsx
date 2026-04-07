@@ -134,8 +134,6 @@ const FormSubmission: React.FC = () => {
     }
   };
 
-
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     

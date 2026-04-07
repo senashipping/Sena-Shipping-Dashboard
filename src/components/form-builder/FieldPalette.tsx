@@ -114,7 +114,12 @@ const FieldPalette: React.FC<FieldPaletteProps> = ({ className = "", onAddTempla
 
       <div>
         <h4 className="text-sm font-medium text-gray-600 mb-2">Advanced</h4>
-        <DraggableTableSection onAdd={onAddTableSection} />
+        <div className="grid grid-cols-1 gap-2">
+          <DraggableTableSection onAdd={onAddTableSection} />
+          {FIELD_TEMPLATES.filter((t) => t.id === "embedded_excel").map((template) => (
+            <DraggableField key={template.id} template={template} onAdd={onAddTemplate} />
+          ))}
+        </div>
       </div>
     </div>
   );

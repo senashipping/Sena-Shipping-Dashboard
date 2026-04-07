@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Checkbox } from "../ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
 import { Label } from "../ui/label";
-import { Trash2, Settings, ArrowUp, ArrowDown } from "lucide-react";
+import { Trash2, Settings, ArrowUp, ArrowDown, LayoutGrid } from "lucide-react";
 import { FormField } from "../../types";
 
 interface FieldRendererProps {
@@ -142,6 +142,28 @@ const FieldRenderer: React.FC<FieldRendererProps> = ({
                 <p className="text-sm text-gray-500">Signature Upload Field</p>
                 <p className="text-xs text-gray-400">Images only • Max 2MB</p>
               </div>
+            </div>
+          </div>
+        );
+
+      case "embedded_excel":
+        return (
+          <div className="flex items-start gap-3 p-3 border-2 border-dashed rounded-lg bg-slate-50 dark:bg-slate-900/40">
+            <LayoutGrid className="w-8 h-8 text-green-600 shrink-0" />
+            <div className="text-sm text-gray-600 dark:text-gray-300">
+              <p className="font-medium text-gray-800 dark:text-white">Excel workbook</p>
+              <p className="text-xs mt-1">
+                Users fill this in-app like a spreadsheet. Upload an .xlsx file in Properties.
+              </p>
+              {field.excelFileDataUrl ? (
+                <p className="text-xs mt-2 font-medium text-muted-foreground">
+                  Attached: {field.excelDisplayName || "Uploaded .xlsx"}
+                </p>
+              ) : (
+                <p className="text-xs mt-2 text-amber-700 dark:text-amber-500">
+                  No file yet — open Properties and upload an .xlsx file.
+                </p>
+              )}
             </div>
           </div>
         );

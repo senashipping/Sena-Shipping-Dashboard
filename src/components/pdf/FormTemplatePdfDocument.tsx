@@ -365,6 +365,15 @@ function formatFieldValue(field: FormField, raw: any, variant: FormTemplatePdfVa
       if (s2.startsWith("data:image")) return { imageSrc: s2 };
       return { text: s2 || "\u2014" };
     }
+    case "embedded_excel": {
+      if (raw && typeof raw === "object" && Array.isArray((raw as any).sheets)) {
+        const parts = (raw as { sheets: { name: string; grid: unknown[][] }[] }).sheets.map(
+          (sh) => `${sh.name}: ${sh.grid?.length ?? 0}×${sh.grid?.[0]?.length ?? 0} cells`,
+        );
+        return { text: parts.length ? parts.join("; ") : "\u2014" };
+      }
+      return { text: "\u2014" };
+    }
     default:
       return { text: String(raw) };
   }

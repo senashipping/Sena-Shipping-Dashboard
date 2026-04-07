@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { FormField, FormSection, TableConfig } from "../../types";
 import { Alert, AlertDescription } from "../ui/alert";
+import EmbeddedExcelWorkbook from "./EmbeddedExcelWorkbook";
 
 interface SharedFormRendererProps {
   formState: {
@@ -168,6 +169,26 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
           </div>
         );
       
+      case "embedded_excel": {
+        const source = field.excelFileDataUrl?.trim() || field.excelFileUrl?.trim();
+        if (!source) {
+          return (
+            <Alert>
+              <AlertDescription className="text-sm">
+                No Excel file uploaded. In the form builder, select this field and upload an .xlsx file in Properties.
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        return (
+          <EmbeddedExcelWorkbook
+            excelSource={source}
+            value={formData[field.name]}
+            onChange={(next) => onFieldChange(field.name, next)}
+          />
+        );
+      }
+
       case "signature":
         return (
           <div className="space-y-2">
@@ -425,7 +446,7 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
 
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="font-medium text-md">{config.title}</h4>
           {config.allowAddRows && (
             <Button 
@@ -450,7 +471,12 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
                   </th>
                 ))}
                 {config.allowDeleteRows && (
-                  <th className="p-2 text-left border">Actions</th>
+                  <th
+                    scope="col"
+                    className="w-17 min-w-17 max-w-17 p-2 border text-center align-middle whitespace-nowrap"
+                  >
+                    Actions
+                  </th>
                 )}
               </tr>
             </thead>
@@ -463,12 +489,14 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
                     </td>
                   ))}
                   {config.allowDeleteRows && (
-                    <td className="p-2 border">
+                    <td className="w-12 min-w-12 max-w-12 p-1 border text-center align-middle whitespace-nowrap">
                       <Button
                         type="button"
                         variant="destructive"
-                        size="sm"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
                         onClick={() => handleRemoveRow(rowIndex)}
+                        aria-label="Delete row"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>

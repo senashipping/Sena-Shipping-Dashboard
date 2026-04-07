@@ -13,7 +13,8 @@ import {
   Phone, 
   Globe,
   Table,
-  PenTool
+  PenTool,
+  LayoutGrid,
 } from "lucide-react";
 
 export const FIELD_TEMPLATES: FieldTemplate[] = [
@@ -192,6 +193,20 @@ export const FIELD_TEMPLATES: FieldTemplate[] = [
       validation: { pattern: "^https?:\\/\\/.+", message: "Please enter a valid URL starting with http:// or https://" },
       layout: { width: "full", order: 0, row: 0, column: 0 }
     }
+  },
+  {
+    id: "embedded_excel",
+    type: "embedded_excel",
+    label: "Excel workbook",
+    icon: "LayoutGrid",
+    description: "Upload an .xlsx file and fill it like a spreadsheet",
+    defaultProps: {
+      type: "embedded_excel",
+      required: false,
+      excelFileUrl: "",
+      excelDisplayName: "",
+      layout: { width: "full", order: 0, row: 0, column: 0 },
+    }
   }
 ];
 
@@ -209,5 +224,6 @@ export const ICON_MAP = {
   Phone,
   Globe,
   Table,
-  PenTool
+  PenTool,
+  LayoutGrid,
 };

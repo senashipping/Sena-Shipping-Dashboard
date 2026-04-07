@@ -18,6 +18,7 @@ import { Button } from "./ui/button";
 import SubmissionPdfDocument from "./pdf/SubmissionPdfDocument";
 import { downloadPdfDocument } from "../lib/pdfDownload";
 import { useToast } from "./ui/toast";
+import EmbeddedExcelWorkbook from "./form-builder/EmbeddedExcelWorkbook";
 
 interface SubmissionViewModalProps {
   submissionId: string | null;
@@ -167,6 +168,22 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
             </a>
           ) : 'No file uploaded';
           break;
+        case 'embedded_excel': {
+          const excelSrc = field.excelFileDataUrl || field.excelFileUrl;
+          value = excelSrc ? (
+            <div className="max-h-[min(70vh,520px)] overflow-auto border rounded-md bg-background">
+              <EmbeddedExcelWorkbook
+                excelSource={excelSrc}
+                value={data[field.name]}
+                onChange={() => {}}
+                readOnly
+              />
+            </div>
+          ) : (
+            <span className="text-muted-foreground">No Excel template configured</span>
+          );
+          break;
+        }
         default:
           value = value || 'Not specified';
       }

@@ -8,6 +8,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Button } from "../ui/button";
 import { Plus, Trash2, X } from "lucide-react";
 import { FormField, FormSection, TableConfig, TableColumn } from "../../types";
+import { useToast } from "../ui/toast";
 
 interface PropertiesPanelProps {
   selectedItem: {
@@ -19,11 +20,15 @@ interface PropertiesPanelProps {
   className?: string;
 }
 
+const EMBEDDED_EXCEL_MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   selectedItem,
   onUpdate,
   className = "",
 }) => {
+  const { toast } = useToast();
+
   if (!selectedItem) {
     return (
       <div className={`p-6 ${className}`}>
@@ -103,6 +108,84 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </SelectContent>
         </Select>
       </div>
+
+      {field.type === "embedded_excel" && (
+        <div className="space-y-3">
+          <div>
+            <Label htmlFor="excel-file-upload">Excel file (.xlsx)</Label>
+            <Input
+              id="excel-file-upload"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="cursor-pointer text-sm"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const nameOk = /\.xlsx$/i.test(file.name);
+                if (!nameOk) {
+                  toast({
+                    title: "Invalid file",
+                    description: "Please choose an Excel .xlsx file.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                if (file.size > EMBEDDED_EXCEL_MAX_UPLOAD_BYTES) {
+                  toast({
+                    title: "File too large",
+                    description: "Maximum upload size is 8 MB.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => {
+                  onUpdate({
+                    excelFileDataUrl: reader.result as string,
+                    excelDisplayName: file.name,
+                    excelFileUrl: "",
+                  });
+                  toast({
+                    title: "Excel attached",
+                    description: file.name,
+                    variant: "success",
+                  });
+                };
+                reader.onerror = () => {
+                  toast({
+                    title: "Could not read file",
+                    description: "Try another .xlsx file.",
+                    variant: "destructive",
+                  });
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              The workbook is stored with this form (up to 8 MB). Replace by choosing a new file, or remove and upload again.
+            </p>
+            {field.excelFileDataUrl && (
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="text-xs rounded-md border bg-muted px-2 py-1 font-mono truncate max-w-full">
+                  Using: {field.excelDisplayName || "Uploaded .xlsx"}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() =>
+                    onUpdate({ excelFileDataUrl: undefined, excelDisplayName: undefined, excelFileUrl: "" })
+                  }
+                >
+                  Remove file
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {(field.type === "select" || field.type === "radio" || field.type === "checkbox") && (
         <div>

@@ -51,8 +51,13 @@ export interface FormField {
   id: string;
   name: string;
   label: string;
-  type: "text" | "email" | "number" | "date" | "datetime-local" | "time" | "textarea" | "select" | "checkbox" | "radio" | "file" | "phone" | "url" | "signature";
+  type: "text" | "email" | "number" | "date" | "datetime-local" | "time" | "textarea" | "select" | "checkbox" | "radio" | "file" | "phone" | "url" | "signature" | "embedded_excel";
   required: boolean;
+  /** Legacy: public path to `.xlsx` (older forms). New forms use `excelFileDataUrl` only. */
+  excelFileUrl?: string;
+  /** Uploaded `.xlsx` as a data URL (takes precedence over `excelFileUrl` when set). */
+  excelFileDataUrl?: string;
+  excelDisplayName?: string;
   placeholder?: string;
   description?: string;
   options?: { label: string; value: string }[];
