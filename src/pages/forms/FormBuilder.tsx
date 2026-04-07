@@ -40,6 +40,29 @@ interface FormBuilderState {
   tableConfig?: TableConfig;
 }
 
+const ALLOWED_FIELD_TYPES = new Set([
+  "text",
+  "email",
+  "number",
+  "date",
+  "datetime-local",
+  "time",
+  "textarea",
+  "select",
+  "checkbox",
+  "radio",
+  "file",
+  "phone",
+  "url",
+  "signature",
+]);
+
+const sanitizeFieldForSubmit = (field: FormField): FormField => {
+  const normalizedType = field.type === "embedded_excel" ? "file" : field.type;
+  const safeType = ALLOWED_FIELD_TYPES.has(normalizedType) ? normalizedType : "text";
+  return { ...field, type: safeType as FormField["type"] };
+};
+
 const FormBuilder: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -603,7 +626,7 @@ const FormBuilder: React.FC = () => {
     };
 
     if (formState.formType === "regular") {
-      submitData.fields = formState.fields;
+      submitData.fields = formState.fields.map(sanitizeFieldForSubmit);
     } else if (formState.formType === "table") {
       submitData.tableConfig = formState.tableConfig;
     } else if (formState.formType === "mixed") {
@@ -612,6 +635,12 @@ const FormBuilder: React.FC = () => {
         if (section.type === "table") {
           const { fields, ...cleanSection } = section;
           return cleanSection;
+        }
+        if (section.type === "fields") {
+          return {
+            ...section,
+            fields: (section.fields || []).map(sanitizeFieldForSubmit),
+          };
         }
         return section;
       });
