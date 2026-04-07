@@ -46,6 +46,49 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
 }) => {
   const [signatureErrors, setSignatureErrors] = React.useState<Record<string, string>>({});
 
+  const getFilePreview = (rawValue: unknown): { name: string; url?: string } | null => {
+    if (!rawValue) return null;
+
+    if (typeof rawValue === "string") {
+      const trimmed = rawValue.trim();
+      if (!trimmed) return null;
+      const safeName = trimmed.split("/").pop() || trimmed;
+      const isUrl = /^https?:\/\//i.test(trimmed) || trimmed.startsWith("/");
+      return { name: safeName, url: isUrl ? trimmed : undefined };
+    }
+
+    if (rawValue instanceof FileList) {
+      const first = rawValue[0];
+      return first ? { name: first.name } : null;
+    }
+
+    if (rawValue instanceof File) {
+      return { name: rawValue.name };
+    }
+
+    if (Array.isArray(rawValue) && rawValue.length > 0) {
+      return getFilePreview(rawValue[0]);
+    }
+
+    if (typeof rawValue === "object" && rawValue !== null) {
+      const candidate = rawValue as Record<string, unknown>;
+      const name =
+        (typeof candidate.originalName === "string" && candidate.originalName) ||
+        (typeof candidate.filename === "string" && candidate.filename) ||
+        (typeof candidate.name === "string" && candidate.name) ||
+        (typeof candidate.path === "string" && candidate.path.split("/").pop()) ||
+        "";
+      const url =
+        (typeof candidate.url === "string" && candidate.url) ||
+        (typeof candidate.path === "string" && candidate.path) ||
+        undefined;
+      if (!name) return null;
+      return { name, url };
+    }
+
+    return null;
+  };
+
   // Helper functions for pre-filled data
   const getInitialCellValue = (config: TableConfig, rowIndex: number, columnName: string, userValue?: any) => {
     // Check if there's a pre-filled value
@@ -155,6 +198,7 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
         );
       
       case "file":
+        const filePreview = getFilePreview(value);
         return (
           <div className="space-y-2">
             <Input
@@ -163,6 +207,23 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
               required={field.required}
               className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
             />
+            {filePreview && (
+              <p className="text-xs text-gray-600">
+                Current file:{" "}
+                {filePreview.url ? (
+                  <a
+                    href={filePreview.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 underline hover:text-blue-700"
+                  >
+                    {filePreview.name}
+                  </a>
+                ) : (
+                  <span className="font-medium">{filePreview.name}</span>
+                )}
+              </p>
+            )}
             {field.description && (
               <p className="text-xs text-gray-500">{field.description}</p>
             )}

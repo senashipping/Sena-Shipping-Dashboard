@@ -40,6 +40,11 @@ interface FormBuilderState {
   tableConfig?: TableConfig;
 }
 
+interface FormValidationErrors {
+  title?: string;
+  category?: string;
+}
+
 const ALLOWED_FIELD_TYPES = new Set([
   "text",
   "email",
@@ -55,11 +60,11 @@ const ALLOWED_FIELD_TYPES = new Set([
   "phone",
   "url",
   "signature",
+  "embedded_excel",
 ]);
 
 const sanitizeFieldForSubmit = (field: FormField): FormField => {
-  const normalizedType = field.type === "embedded_excel" ? "file" : field.type;
-  const safeType = ALLOWED_FIELD_TYPES.has(normalizedType) ? normalizedType : "text";
+  const safeType = ALLOWED_FIELD_TYPES.has(field.type) ? field.type : "text";
   return { ...field, type: safeType as FormField["type"] };
 };
 
@@ -92,6 +97,7 @@ const FormBuilder: React.FC = () => {
 
   const [history, setHistory] = useState<FormBuilderState[]>([formState]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const [validationErrors, setValidationErrors] = useState<FormValidationErrors>({});
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -612,9 +618,19 @@ const FormBuilder: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formState.title.trim() || !formState.category) {
+    const nextValidationErrors: FormValidationErrors = {};
+    if (!formState.title.trim()) {
+      nextValidationErrors.title = "Form name is required.";
+    }
+    if (!formState.category) {
+      nextValidationErrors.category = "Form category is required.";
+    }
+
+    if (Object.keys(nextValidationErrors).length > 0) {
+      setValidationErrors(nextValidationErrors);
       return;
     }
+    setValidationErrors({});
 
     const submitData: any = {
       title: formState.title,
@@ -792,16 +808,30 @@ const FormBuilder: React.FC = () => {
                       <Input
                         id="title"
                         value={formState.title}
-                        onChange={(e) => updateFormState({ title: e.target.value })}
+                        onChange={(e) => {
+                          updateFormState({ title: e.target.value });
+                          if (validationErrors.title && e.target.value.trim()) {
+                            setValidationErrors((prev) => ({ ...prev, title: undefined }));
+                          }
+                        }}
                         required
+                        aria-invalid={!!validationErrors.title}
                         className="border-sena-lightBlue/30 focus:border-sena-gold focus:ring-sena-gold/20"
                       />
+                      {validationErrors.title && (
+                        <p className="mt-1 text-sm text-red-600">{validationErrors.title}</p>
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="category" className="text-sena-navy dark:text-white">Category</Label>
                       <Select
                         value={formState.category}
-                        onValueChange={(value) => updateFormState({ category: value })}
+                        onValueChange={(value) => {
+                          updateFormState({ category: value });
+                          if (validationErrors.category && value) {
+                            setValidationErrors((prev) => ({ ...prev, category: undefined }));
+                          }
+                        }}
                       >
                         <SelectTrigger className="border-sena-lightBlue/30 focus:border-sena-gold focus:ring-sena-gold/20">
                           <SelectValue placeholder="Select category" />
@@ -814,6 +844,9 @@ const FormBuilder: React.FC = () => {
                           )) : []}
                         </SelectContent>
                       </Select>
+                      {validationErrors.category && (
+                        <p className="mt-1 text-sm text-red-600">{validationErrors.category}</p>
+                      )}
                     </div>
                   </div>
 
