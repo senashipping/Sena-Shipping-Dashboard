@@ -241,10 +241,6 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           if (readOnly) return;
           syncFromHot();
         }}
-        afterContextMenuExecute={() => {
-          if (readOnly) return;
-          syncFromHot();
-        }}
       />
     </div>
     </div>
