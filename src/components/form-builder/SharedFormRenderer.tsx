@@ -10,7 +10,7 @@ import { Button } from "../ui/button";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { FormField, FormSection, TableConfig } from "../../types";
 import { Alert, AlertDescription } from "../ui/alert";
-import EmbeddedExcelWorkbook from "./EmbeddedExcelWorkbook";
+import HandsontableWorkbook from "./HandsontableWorkbook";
 
 interface SharedFormRendererProps {
   formState: {
@@ -231,20 +231,22 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
         );
       
       case "embedded_excel": {
-        const source = field.excelFileDataUrl?.trim() || field.excelFileUrl?.trim();
-        if (!source) {
+        const templateWorkbook = field.excelTemplate;
+        const currentWorkbook = formData[field.name];
+        const workbook =
+          currentWorkbook?.sheets?.length ? currentWorkbook : templateWorkbook;
+        if (!workbook?.sheets?.length) {
           return (
             <Alert>
               <AlertDescription className="text-sm">
-                No Excel file uploaded. In the form builder, select this field and upload an .xlsx file in Properties.
+                No spreadsheet template created yet. In the form builder Properties, click "Create Sheet".
               </AlertDescription>
             </Alert>
           );
         }
         return (
-          <EmbeddedExcelWorkbook
-            excelSource={source}
-            value={formData[field.name]}
+          <HandsontableWorkbook
+            data={workbook}
             onChange={(next) => onFieldChange(field.name, next)}
           />
         );

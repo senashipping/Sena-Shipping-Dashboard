@@ -20,14 +20,15 @@ interface PropertiesPanelProps {
   className?: string;
 }
 
-const EMBEDDED_EXCEL_MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   selectedItem,
   onUpdate,
   className = "",
 }) => {
   const { toast } = useToast();
+  const [sheetRows, setSheetRows] = React.useState(10);
+  const [sheetCols, setSheetCols] = React.useState(6);
+  const [sheetCount, setSheetCount] = React.useState(1);
 
   if (!selectedItem) {
     return (
@@ -112,77 +113,98 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       {field.type === "embedded_excel" && (
         <div className="space-y-3">
           <div>
-            <Label htmlFor="excel-file-upload">Excel file (.xlsx)</Label>
-            <Input
-              id="excel-file-upload"
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="cursor-pointer text-sm"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                const nameOk = /\.xlsx$/i.test(file.name);
-                if (!nameOk) {
-                  toast({
-                    title: "Invalid file",
-                    description: "Please choose an Excel .xlsx file.",
-                    variant: "destructive",
-                  });
-                  return;
-                }
-                if (file.size > EMBEDDED_EXCEL_MAX_UPLOAD_BYTES) {
-                  toast({
-                    title: "File too large",
-                    description: "Maximum upload size is 8 MB.",
-                    variant: "destructive",
-                  });
-                  return;
-                }
-                const reader = new FileReader();
-                reader.onload = () => {
+            <Label>Spreadsheet Template</Label>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <div>
+                <Label htmlFor="sheet-rows" className="text-sm">Rows</Label>
+                <Input
+                  id="sheet-rows"
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={sheetRows}
+                  onChange={(e) => setSheetRows(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-cols" className="text-sm">Columns</Label>
+                <Input
+                  id="sheet-cols"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={sheetCols}
+                  onChange={(e) => setSheetCols(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="sheet-count" className="text-sm">Sheets</Label>
+                <Input
+                  id="sheet-count"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={sheetCount}
+                  onChange={(e) => setSheetCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const grid = Array.from({ length: sheetRows }, () =>
+                    Array.from({ length: sheetCols }, () => "")
+                  );
+                  const sheets = Array.from({ length: sheetCount }, (_, index) => ({
+                    name: `Sheet${index + 1}`,
+                    grid: grid.map((row) => [...row]),
+                  }));
                   onUpdate({
-                    excelFileDataUrl: reader.result as string,
-                    excelDisplayName: file.name,
+                    excelTemplate: {
+                      sheets,
+                    },
+                    excelFileDataUrl: "",
+                    excelDisplayName: "",
                     excelFileUrl: "",
                   });
                   toast({
-                    title: "Excel attached",
-                    description: file.name,
+                    title: "Workbook created",
+                    description: `${sheetCount} sheet(s), ${sheetRows} rows x ${sheetCols} columns`,
                     variant: "success",
                   });
-                };
-                reader.onerror = () => {
-                  toast({
-                    title: "Could not read file",
-                    description: "Try another .xlsx file.",
-                    variant: "destructive",
+                }}
+              >
+                Create Workbook
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onUpdate({
+                    excelTemplate: undefined,
+                    excelFileDataUrl: "",
+                    excelDisplayName: "",
+                    excelFileUrl: "",
                   });
-                };
-                reader.readAsDataURL(file);
-              }}
-            />
+                }}
+              >
+                Clear
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
-              The workbook is stored with this form (up to 8 MB). Replace by choosing a new file, or remove and upload again.
+              Spreadsheet is created and edited directly inside the app (Handsontable).
             </p>
-            {field.excelFileDataUrl && (
+            {field.excelTemplate?.sheets?.[0]?.grid?.length ? (
               <div className="flex flex-wrap items-center gap-2 mt-2">
                 <span className="text-xs rounded-md border bg-muted px-2 py-1 font-mono truncate max-w-full">
-                  Using: {field.excelDisplayName || "Uploaded .xlsx"}
+                  Using: {field.excelTemplate.sheets[0].grid.length} rows x {field.excelTemplate.sheets[0].grid[0]?.length || 0} columns
                 </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                  onClick={() =>
-                    onUpdate({ excelFileDataUrl: undefined, excelDisplayName: undefined, excelFileUrl: "" })
-                  }
-                >
-                  Remove file
-                </Button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}

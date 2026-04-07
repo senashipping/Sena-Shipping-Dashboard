@@ -199,7 +199,7 @@ export const FIELD_TEMPLATES: FieldTemplate[] = [
     type: "embedded_excel",
     label: "Excel workbook",
     icon: "LayoutGrid",
-    description: "Upload an .xlsx file and fill it like a spreadsheet",
+    description: "Create and fill a spreadsheet directly inside the app",
     defaultProps: {
       type: "embedded_excel",
       required: false,

@@ -58,6 +58,15 @@ export interface FormField {
   /** Uploaded `.xlsx` as a data URL (takes precedence over `excelFileUrl` when set). */
   excelFileDataUrl?: string;
   excelDisplayName?: string;
+  /** In-app created spreadsheet template (preferred for new forms). */
+  excelTemplate?: {
+    sheets: Array<{
+      name: string;
+      grid: string[][];
+      mergeCells?: Array<{ row: number; col: number; rowspan: number; colspan: number }>;
+      cellMeta?: Array<{ row: number; col: number; className?: string; readOnly?: boolean }>;
+    }>;
+  };
   placeholder?: string;
   description?: string;
   options?: { label: string; value: string }[];

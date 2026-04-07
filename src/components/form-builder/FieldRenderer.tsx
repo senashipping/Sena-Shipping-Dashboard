@@ -153,15 +153,15 @@ const FieldRenderer: React.FC<FieldRendererProps> = ({
             <div className="text-sm text-gray-600 dark:text-gray-300">
               <p className="font-medium text-gray-800 dark:text-white">Excel workbook</p>
               <p className="text-xs mt-1">
-                Users fill this in-app like a spreadsheet. Upload an .xlsx file in Properties.
+                Users fill this in-app like a spreadsheet created in Properties.
               </p>
-              {field.excelFileDataUrl ? (
+              {field.excelTemplate?.sheets?.[0]?.grid?.length ? (
                 <p className="text-xs mt-2 font-medium text-muted-foreground">
-                  Attached: {field.excelDisplayName || "Uploaded .xlsx"}
+                  Sheet ready: {field.excelTemplate.sheets[0].grid.length} rows
                 </p>
               ) : (
                 <p className="text-xs mt-2 text-amber-700 dark:text-amber-500">
-                  No file yet — open Properties and upload an .xlsx file.
+                  No sheet yet — open Properties and create a sheet.
                 </p>
               )}
             </div>
