@@ -27,6 +27,9 @@
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@react-pdf/renderer": "^4.3.2",
+    "@syncfusion/ej2-base": "^33.1.45",
+    "@syncfusion/ej2-react-grids": "^33.1.47",
+    "@syncfusion/ej2-react-spreadsheet": "^33.1.47",
     "@tanstack/react-query": "^4.43.0",
     "@tanstack/react-query-devtools": "^4.41.0",
     "@types/recharts": "^1.8.29",
@@ -46,7 +49,8 @@
     "react-toastify": "^11.0.5",
     "recharts": "2.15.4",
     "tailwind-merge": "^1.14.0",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",

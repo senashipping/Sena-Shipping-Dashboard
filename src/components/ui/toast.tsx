@@ -29,7 +29,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toast = useCallback((newToast: Omit<Toast, "id">) => {
     const duration = newToast.duration ?? 5000;
-    const options: ToastOptions = { autoClose: duration };
+    const toastId = `${newToast.variant || "default"}:${newToast.title}:${newToast.description || ""}`;
+    const options: ToastOptions = { autoClose: duration, toastId };
     const content = (
       <div>
         <div className="font-semibold">{newToast.title}</div>
