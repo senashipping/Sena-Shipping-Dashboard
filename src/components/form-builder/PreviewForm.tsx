@@ -12,9 +12,11 @@ interface PreviewFormProps {
     sections: FormSection[];
     tableConfig?: TableConfig;
   };
+  onSubmit?: () => void;
+  isSubmitting?: boolean;
 }
 
-const PreviewForm: FC<PreviewFormProps> = ({ formState }) => {
+const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting = false }) => {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
 
@@ -75,8 +77,8 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState }) => {
   };
 
   const submitButton = (
-    <Button type="button" className="w-full">
-      Submit Form
+    <Button type="button" className="w-full" onClick={onSubmit} disabled={!onSubmit || isSubmitting}>
+      {isSubmitting ? "Submitting..." : "Submit Form"}
     </Button>
   );
 

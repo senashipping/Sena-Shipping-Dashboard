@@ -99,6 +99,7 @@ const FormBuilder: React.FC = () => {
   const [history, setHistory] = useState<FormBuilderState[]>([formState]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [validationErrors, setValidationErrors] = useState<FormValidationErrors>({});
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -145,6 +146,7 @@ const FormBuilder: React.FC = () => {
   const createMutation = useMutation({
     mutationFn: (data: any) => api.createForm(data),
     onSuccess: () => {
+      setIsPreviewOpen(false);
       navigate("/admin/forms");
     },
   });
@@ -152,6 +154,7 @@ const FormBuilder: React.FC = () => {
   const updateMutation = useMutation({
     mutationFn: (data: any) => api.updateForm(id!, data),
     onSuccess: () => {
+      setIsPreviewOpen(false);
       navigate("/admin/forms");
     },
   });
@@ -616,8 +619,8 @@ const FormBuilder: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent | React.MouseEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e?: React.FormEvent | React.MouseEvent) => {
+    e?.preventDefault();
 
     const nextValidationErrors: FormValidationErrors = {};
     if (!formState.title.trim()) {
@@ -725,7 +728,7 @@ const FormBuilder: React.FC = () => {
                 >
                   <Redo className="w-4 h-4" />
                 </Button>
-                <Dialog>
+                <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="hidden sm:flex">
                       <Eye className="w-4 h-4 mr-2" />
@@ -742,7 +745,11 @@ const FormBuilder: React.FC = () => {
                       <DialogTitle>Form Preview - {formState.title}</DialogTitle>
                     </DialogHeader>
                     <div className="mt-4">
-                      <PreviewForm formState={formState} />
+                      <PreviewForm
+                        formState={formState}
+                        onSubmit={() => handleSubmit()}
+                        isSubmitting={createMutation.isPending || updateMutation.isPending}
+                      />
                     </div>
                   </DialogContent>
                 </Dialog>

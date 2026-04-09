@@ -959,11 +959,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           if (!hot) return;
           const hasValidCell = Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0;
           if (!hasValidCell) {
-            lastSelectionRef.current = null;
-            delete sheetSelectionRef.current[activeSheetIndex];
-            setFormulaInput("");
-            setSelectedAlign(null);
-            setSelectedVAlign(null);
+            // Keep last valid selection so toolbar actions still apply
+            // after focus moves from the grid to toolbar controls.
             return;
           }
           const selected = hot.getSelectedLast?.();
@@ -1035,7 +1032,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       <div className="px-2 py-1 text-xs text-amber-700 border border-amber-200 rounded bg-amber-50">
         Preview mode showing first {previewRows} rows x {previewCols} columns for stability.
       </div>
-    )}t
+    )}
     </div>
   );
 };
