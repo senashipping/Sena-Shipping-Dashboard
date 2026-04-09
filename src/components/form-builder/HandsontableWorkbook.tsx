@@ -820,6 +820,44 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     collectCurrentSheetFromHot(true);
   };
 
+  const toggleFillableSelection = () => {
+    const range = getSelectedRange();
+    if (!range || readOnly) return;
+
+    applyClassToSelection("meta-fillable", false);
+
+    const sheet = workbookRef.current.sheets[activeSheetIndex];
+    if (!sheet) return;
+
+    const metaByKey = new Map<
+      string,
+      NonNullable<SheetData["cellMeta"]>[number]
+    >();
+    for (const meta of sheet.cellMeta || []) {
+      metaByKey.set(`${meta.row}:${meta.col}`, meta);
+    }
+
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (let c = range.startCol; c <= range.endCol; c++) {
+        const key = `${r}:${c}`;
+        const current = metaByKey.get(key) || { row: r, col: c };
+        const tokens = String(current.className || "")
+          .split(" ")
+          .filter(Boolean);
+        if (!tokens.includes("meta-fillable")) tokens.push("meta-fillable");
+        metaByKey.set(key, {
+          ...current,
+          row: r,
+          col: c,
+          className: tokens.join(" ").trim() || undefined,
+        });
+      }
+    }
+
+    sheet.cellMeta = Array.from(metaByKey.values());
+    onChange({ sheets: [...workbookRef.current.sheets] });
+  };
+
   // ─── sort / find-replace ────────────────────────────────────────────────────
 
   const sortSelectedColumn = (order: "asc" | "desc") => {
@@ -942,7 +980,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         for (let c = range.startCol; c <= range.endCol; c++) {
           const cls = String(hot.getCellMeta(r, c)?.className || "")
             .split(" ")
-            .filter((t: string) => !t.startsWith("meta-"));
+            .filter(
+              (t: string) => t === "meta-fillable" || !t.startsWith("meta-"),
+            );
           hot.setCellMeta(r, c, "className", cls.join(" ").trim());
           hot.setCellMeta(r, c, "type", undefined as any);
           hot.setCellMeta(r, c, "numericFormat", undefined as any);
@@ -1086,13 +1126,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
   // ─── cell renderer ───────────────────────────────────────────────────────────
 
-  const shouldApplyCellRenderer = !readOnly || imageMap.size > 0;
-
   const cellsCallback = React.useCallback(
     (row: number, col: number) => {
       const persistedMeta = persistedCellMetaMap.get(`${row}:${col}`);
       const cp: any = {};
-      if (!readOnly) cp.readOnly = false;
+      const persistedClassName = String(persistedMeta?.className || "");
+      const classTokens = persistedClassName.split(" ").filter(Boolean);
+      const isFillable = classTokens.includes("meta-fillable");
+      cp.readOnly = readOnly ? !isFillable : false;
       if (persistedMeta?.className) cp.className = persistedMeta.className;
       if (persistedMeta?.type) cp.type = persistedMeta.type;
       if (persistedMeta?.dateFormat) cp.dateFormat = persistedMeta.dateFormat;
@@ -1267,11 +1308,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         .meta-valign-top { vertical-align: top !important; }
         .meta-valign-middle { vertical-align: middle !important; }
         .meta-valign-bottom { vertical-align: bottom !important; }
+        .meta-fillable { background-color: #fffbe6 !important; }
       `}</style>
 
       {/* ── Toolbar ── */}
       {!readOnly && (
-        <div className="flex flex-wrap items-center gap-1 p-2 border rounded-md bg-slate-50">
+        <div className="relative z-10 flex flex-wrap items-center gap-1 p-2 border rounded-md bg-slate-50">
           <span
             className="px-2 text-xs font-medium border rounded bg-white min-w-[3rem] text-center"
             title="Active selection"
@@ -1487,33 +1529,32 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         </div>
       )}
 
-      {/* ── Formula bar ── */}
-      <div className="flex items-center gap-2 p-2 border rounded-md bg-white">
-        <span className="text-xs text-gray-500 font-medium w-12 shrink-0">
-          {selectionLabel}
-        </span>
-        <span className="text-xs text-gray-400 select-none">fx</span>
-        <input
-          value={formulaInput}
-          onChange={(e) => setFormulaInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              applyFormulaBar();
-            }
-            if (e.key === "Escape") {
-              const hot = hotRef.current?.hotInstance;
-              const range = getSelectedRange();
-              if (hot && range) {
-                const v = hot.getDataAtCell(range.startRow, range.startCol);
-                setFormulaInput(v == null ? "" : String(v));
+      {!readOnly && (
+        <div className="relative z-10 flex items-center gap-2 p-2 border rounded-md bg-white">
+          <span className="text-xs text-gray-500 font-medium w-12 shrink-0">
+            {selectionLabel}
+          </span>
+          <span className="text-xs text-gray-400 select-none">fx</span>
+          <input
+            value={formulaInput}
+            onChange={(e) => setFormulaInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                applyFormulaBar();
               }
-            }
-          }}
-          className="flex-1 h-8 px-2 text-sm border rounded font-mono"
-          placeholder="Enter value or formula (e.g. =SUM(A1:A5))"
-        />
-        {!readOnly && (
+              if (e.key === "Escape") {
+                const hot = hotRef.current?.hotInstance;
+                const range = getSelectedRange();
+                if (hot && range) {
+                  const v = hot.getDataAtCell(range.startRow, range.startCol);
+                  setFormulaInput(v == null ? "" : String(v));
+                }
+              }
+            }}
+            className="flex-1 h-8 px-2 text-sm border rounded font-mono"
+            placeholder="Enter value or formula (e.g. =SUM(A1:A5))"
+          />
           <Button
             type="button"
             size="sm"
@@ -1523,11 +1564,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           >
             ✓ Apply
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Sheet tabs ── */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="relative z-10 flex flex-wrap items-center gap-2">
         {sheetTabs.map((sheet, index) => (
           <Button
             key={`${sheet.name}-${index}`}
@@ -1668,6 +1709,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             />
             <TB onClick={applyDropdownValidation}>Set Dropdown</TB>
             <TB onClick={applyDateCellType}>Set Date Cell</TB>
+            <TB
+              onClick={toggleFillableSelection}
+              title="Mark selected cells as fillable in Preview"
+            >
+              Mark Fillable
+            </TB>
 
             <span className="text-xs text-gray-500 ml-1">Freeze</span>
             <input
@@ -1697,7 +1744,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       </div>
 
       {/* ── Grid ── */}
-      <div className="overflow-hidden border rounded-md">
+      <div className="relative z-0 overflow-hidden border rounded-md">
         <HotTable
           ref={hotRef}
           data={initialGrid}
@@ -1705,7 +1752,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           rowHeaders
           colHeaders
           licenseKey="non-commercial-and-evaluation"
-          readOnly={readOnly}
+          readOnly={false}
           width="100%"
           stretchH="all"
           height={320}
@@ -1764,7 +1811,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           wordWrap
           autoWrapRow
           autoWrapCol
-          cells={shouldApplyCellRenderer ? cellsCallback : undefined}
+          cells={cellsCallback}
           afterChange={() => refreshUndoRedoState()}
           afterSelection={(r, c, r2, c2) => {
             if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0)
