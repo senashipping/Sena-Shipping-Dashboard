@@ -91,6 +91,7 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState }) => {
       onAddTableRow={handleAddTableRow}
       onRemoveTableRow={handleRemoveTableRow}
       useLocalExcelState
+      excelReadOnly
       submitButton={submitButton}
     />
   );

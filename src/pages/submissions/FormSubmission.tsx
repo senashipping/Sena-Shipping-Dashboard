@@ -219,6 +219,7 @@ const FormSubmission: React.FC = () => {
             onMixedTableChange={handleMixedTableChange}
             onAddTableRow={handleAddTableRow}
             onRemoveTableRow={handleRemoveTableRow}
+            excelReadOnly
             submitButton={
               <Button
                 type="submit"

@@ -7,9 +7,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Checkbox } from "../ui/checkbox";
 import { Button } from "../ui/button";
 import { Plus, Trash2, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 import { FormField, FormSection, TableConfig, TableColumn } from "../../types";
 import { useToast } from "../ui/toast";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import HandsontableWorkbook from "./HandsontableWorkbook";
 
 interface PropertiesPanelProps {
   selectedItem: {
@@ -31,10 +40,43 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const [sheetCols, setSheetCols] = React.useState(6);
   const [sheetCount, setSheetCount] = React.useState(1);
   const [isImportingTemplate, setIsImportingTemplate] = React.useState(false);
+  const [isWorkbookEditorOpen, setIsWorkbookEditorOpen] = React.useState(false);
+  const [workbookDraft, setWorkbookDraft] = React.useState<any | null>(null);
   const importTemplateInputRef = React.useRef<HTMLInputElement | null>(null);
+  React.useEffect(() => {
+    setIsWorkbookEditorOpen(false);
+    setWorkbookDraft(null);
+  }, [selectedItem?.id]);
+
 
   const MAX_IMPORT_ROWS = 650;
   const MAX_IMPORT_COLS = 120;
+  const MAX_STYLE_SCAN_CELLS = 26000;
+  const MAX_IMPORT_IMAGES = 40;
+
+  const normalizeHexColor = (raw?: string): string | null => {
+    if (!raw) return null;
+    const clean = raw.replace("#", "").trim();
+    if (clean.length === 6) return clean.toLowerCase();
+    if (clean.length === 8) return clean.slice(2).toLowerCase();
+    return null;
+  };
+
+  const getXlsxColorHex = (color: any): string | null => {
+    if (!color) return null;
+    if (typeof color.rgb === "string") return normalizeHexColor(color.rgb);
+    if (typeof color.argb === "string") return normalizeHexColor(color.argb);
+    return null;
+  };
+
+  const toBase64 = (bytes: Uint8Array): string => {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  };
 
   if (!selectedItem) {
     return (
@@ -61,7 +103,40 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       }
 
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+      const workbook = XLSX.read(buffer, { type: "array", cellDates: true, cellStyles: true });
+      const imageMapBySheet = new Map<string, Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }>>();
+      try {
+        const excelJsWorkbook = new ExcelJS.Workbook();
+        await excelJsWorkbook.xlsx.load(buffer as ArrayBuffer);
+        for (const ws of excelJsWorkbook.worksheets) {
+          const items: Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }> = [];
+          const images = ws.getImages().slice(0, MAX_IMPORT_IMAGES);
+          for (const item of images) {
+            const image = excelJsWorkbook.getImage(Number(item.imageId)) as any;
+            if (!image?.buffer || !image?.extension) continue;
+            const range = item.range as any;
+            const tl = range?.tl;
+            if (!tl) continue;
+            const row = Math.max(0, Math.floor(Number(tl.nativeRow || 0)));
+            const col = Math.max(0, Math.floor(Number(tl.nativeCol || 0)));
+            const brRow = Math.max(row + 1, Math.ceil(Number(range?.br?.nativeRow || row + 1)));
+            const brCol = Math.max(col + 1, Math.ceil(Number(range?.br?.nativeCol || col + 1)));
+            const rawBuffer = image.buffer instanceof Uint8Array ? image.buffer : new Uint8Array(image.buffer);
+            const dataUrl = `data:image/${String(image.extension).toLowerCase()};base64,${toBase64(rawBuffer)}`;
+            items.push({
+              row,
+              col,
+              rowspan: Math.max(1, brRow - row),
+              colspan: Math.max(1, brCol - col),
+              dataUrl,
+            });
+          }
+          imageMapBySheet.set(ws.name, items);
+        }
+      } catch {
+        // Keep import robust even if image extraction fails.
+      }
+
       const sheets = workbook.SheetNames.map((name, index) => {
         const ws = workbook.Sheets[name];
         const ref = ws?.["!ref"] || "A1";
@@ -89,6 +164,56 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             }))
           : [];
 
+        const cellMeta: Array<{ row: number; col: number; className?: string }> = [];
+        if (rows * cols <= MAX_STYLE_SCAN_CELLS) {
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const addr = XLSX.utils.encode_cell({ r: r + range.s.r, c: c + range.s.c });
+              const cell = ws?.[addr] as any;
+              const style = cell?.s;
+              if (!style) continue;
+              const classes: string[] = [];
+
+              if (style.font?.bold) classes.push("meta-bold");
+              if (style.font?.italic) classes.push("meta-italic");
+              if (style.font?.underline) classes.push("meta-underline");
+              if (style.font?.strike) classes.push("meta-strike");
+
+              const fontName = typeof style.font?.name === "string" ? style.font.name.trim() : "";
+              if (fontName) classes.push(`meta-font-${fontName.replace(/\s+/g, "_")}`);
+              // Excel stores font size in points; renderer expects pixels.
+              const fontSizePt = Number(style.font?.sz);
+              if (!Number.isNaN(fontSizePt) && fontSizePt > 0) {
+                const fontSizePx = Math.round((fontSizePt * 96) / 72);
+                classes.push(`meta-size-${Math.max(8, fontSizePx)}`);
+              }
+
+              const textColor = getXlsxColorHex(style.font?.color);
+              if (textColor) classes.push(`meta-color-${textColor}`);
+              const fillColor = getXlsxColorHex(style.fill?.fgColor) || getXlsxColorHex(style.fill?.bgColor);
+              if (fillColor) classes.push(`meta-fill-${fillColor}`);
+
+              const hAlign = String(style.alignment?.horizontal || "").toLowerCase();
+              if (hAlign === "left" || hAlign === "center" || hAlign === "right" || hAlign === "justify") {
+                classes.push(`meta-align-${hAlign}`);
+              }
+              const vAlign = String(style.alignment?.vertical || "").toLowerCase();
+              if (vAlign === "top") classes.push("meta-valign-top");
+              if (vAlign === "center") classes.push("meta-valign-middle");
+              if (vAlign === "bottom") classes.push("meta-valign-bottom");
+              if (style.alignment?.wrapText) classes.push("meta-wrap");
+
+              if (classes.length > 0) {
+                cellMeta.push({
+                  row: r,
+                  col: c,
+                  className: classes.join(" "),
+                });
+              }
+            }
+          }
+        }
+
         const colWidthsPx = Array.from({ length: cols }, (_, i) => {
           const col = (ws?.["!cols"] || [])[i + range.s.c] as any;
           if (col?.wpx) return Math.round(col.wpx);
@@ -103,13 +228,24 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           return 24;
         });
 
+        const importedImages = (imageMapBySheet.get(name) || [])
+          .map((img) => ({
+            row: img.row - range.s.r,
+            col: img.col - range.s.c,
+            rowspan: img.rowspan,
+            colspan: img.colspan,
+            dataUrl: img.dataUrl,
+          }))
+          .filter((img) => img.row >= 0 && img.col >= 0 && img.row < rows && img.col < cols);
+
         return {
           name: name || `Sheet${index + 1}`,
           grid,
           mergeCells: merges,
+          images: importedImages,
           colWidthsPx,
           rowHeightsPx,
-          cellMeta: [],
+          cellMeta,
         };
       });
 
@@ -324,6 +460,17 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <span className="text-xs rounded-md border bg-muted px-2 py-1 font-mono truncate max-w-full">
                   Using: {field.excelTemplate.sheets[0].grid.length} rows x {field.excelTemplate.sheets[0].grid[0]?.length || 0} columns
                 </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    const cloned = JSON.parse(JSON.stringify(field.excelTemplate));
+                    setWorkbookDraft(cloned);
+                    setIsWorkbookEditorOpen(true);
+                  }}
+                >
+                  Edit Workbook
+                </Button>
               </div>
             ) : null}
           </div>
@@ -412,6 +559,60 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {field.type === "embedded_excel" && (
+        <Dialog open={isWorkbookEditorOpen} onOpenChange={(open) => setIsWorkbookEditorOpen(open)}>
+          <DialogContent className="max-w-[min(96vw,1200px)] max-h-[90vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Edit Workbook</DialogTitle>
+              <DialogDescription>
+                Edit workbook content here, then click Save Changes to apply it to this field.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[65vh] overflow-auto">
+              {workbookDraft?.sheets?.length ? (
+                <HandsontableWorkbook
+                  data={workbookDraft}
+                  onChange={(next) => setWorkbookDraft(next)}
+                  readOnly={false}
+                />
+              ) : (
+                <div className="p-3 text-sm text-muted-foreground border rounded-md bg-muted/30">
+                  No workbook data available. Create or import a workbook first.
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsWorkbookEditorOpen(false);
+                  setWorkbookDraft(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!workbookDraft?.sheets?.length}
+                onClick={() => {
+                  if (!workbookDraft?.sheets?.length) return;
+                  onUpdate({ excelTemplate: workbookDraft });
+                  setIsWorkbookEditorOpen(false);
+                  setWorkbookDraft(null);
+                  toast({
+                    title: "Workbook saved",
+                    description: "Template changes applied to this field.",
+                    variant: "success",
+                  });
+                }}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
