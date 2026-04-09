@@ -30,6 +30,9 @@ interface SharedFormRendererProps {
   onAddTableRow?: (tableId?: string) => void;
   onRemoveTableRow?: (rowIndex: number, tableId?: string) => void;
   submitButton?: React.ReactNode;
+  lightweightExcelPreview?: boolean;
+  useLocalExcelState?: boolean;
+  excelReadOnly?: boolean;
 }
 
 const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
@@ -42,9 +45,14 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
   onMixedTableChange,
   onAddTableRow,
   onRemoveTableRow,
-  submitButton
+  submitButton,
+  lightweightExcelPreview = false,
+  useLocalExcelState = false,
+  excelReadOnly = false,
 }) => {
   const [signatureErrors, setSignatureErrors] = React.useState<Record<string, string>>({});
+  const [excelPreviewSheetIndex, setExcelPreviewSheetIndex] = React.useState<Record<string, number>>({});
+  const [localExcelState, setLocalExcelState] = React.useState<Record<string, any>>({});
 
   const getFilePreview = (rawValue: unknown): { name: string; url?: string } | null => {
     if (!rawValue) return null;
@@ -233,8 +241,13 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
       case "embedded_excel": {
         const templateWorkbook = field.excelTemplate;
         const currentWorkbook = formData[field.name];
+        const localWorkbook = localExcelState[field.name];
         const workbook =
-          currentWorkbook?.sheets?.length ? currentWorkbook : templateWorkbook;
+          localWorkbook?.sheets?.length
+            ? localWorkbook
+            : currentWorkbook?.sheets?.length
+              ? currentWorkbook
+              : templateWorkbook;
         if (!workbook?.sheets?.length) {
           return (
             <Alert>
@@ -244,10 +257,66 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
             </Alert>
           );
         }
+        if (lightweightExcelPreview) {
+          const sheetIndex = Math.min(
+            excelPreviewSheetIndex[field.name] || 0,
+            Math.max(0, workbook.sheets.length - 1)
+          );
+          const activeSheet = workbook.sheets[sheetIndex];
+          const grid = Array.isArray(activeSheet?.grid) ? activeSheet.grid : [];
+          const rows = grid.slice(0, 60);
+          const maxCols = Math.min(24, Math.max(0, ...rows.map((r: any[]) => (Array.isArray(r) ? r.length : 0))));
+          return (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {workbook.sheets.map((sheet: any, idx: number) => (
+                  <Button
+                    key={`${field.name}-sheet-${idx}`}
+                    type="button"
+                    size="sm"
+                    variant={idx === sheetIndex ? "default" : "outline"}
+                    onClick={() =>
+                      setExcelPreviewSheetIndex((prev) => ({ ...prev, [field.name]: idx }))
+                    }
+                  >
+                    {sheet.name || `Sheet${idx + 1}`}
+                  </Button>
+                ))}
+              </div>
+              <div className="overflow-auto border rounded-md max-h-[380px]">
+                <table className="w-full border-collapse text-xs">
+                  <tbody>
+                    {rows.map((row: any[], rIdx: number) => (
+                      <tr key={`${field.name}-row-${rIdx}`}>
+                        {Array.from({ length: maxCols }).map((_, cIdx) => (
+                          <td key={`${field.name}-cell-${rIdx}-${cIdx}`} className="p-1 border min-w-[72px]">
+                            {String(row?.[cIdx] ?? "")}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {(grid.length > 60 || maxCols >= 24) && (
+                <p className="text-xs text-muted-foreground">
+                  Preview limited to first 60 rows and 24 columns.
+                </p>
+              )}
+            </div>
+          );
+        }
         return (
           <HandsontableWorkbook
             data={workbook}
-            onChange={(next) => onFieldChange(field.name, next)}
+            readOnly={excelReadOnly}
+            onChange={(next) => {
+              if (useLocalExcelState) {
+                setLocalExcelState((prev) => ({ ...prev, [field.name]: next }));
+                return;
+              }
+              onFieldChange(field.name, next);
+            }}
           />
         );
       }

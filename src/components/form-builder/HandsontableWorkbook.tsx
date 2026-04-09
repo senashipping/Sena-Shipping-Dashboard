@@ -6,7 +6,6 @@ import { registerAllModules } from "handsontable/registry";
 import { Button } from "../ui/button";
 import { HyperFormula } from "hyperformula";
 import ExcelJS from "exceljs";
-import * as XLSX from "xlsx";
 
 registerAllModules();
 
@@ -26,131 +25,57 @@ interface HandsontableWorkbookProps {
   readOnly?: boolean;
 }
 
-const argbToHex = (argb?: string): string | null => {
-  if (!argb || typeof argb !== "string") return null;
-  if (argb.length === 8) return `#${argb.slice(2)}`;
-  if (argb.length === 6) return `#${argb}`;
-  return null;
-};
+const MAX_PREVIEW_ROWS = 220;
+const MAX_PREVIEW_COLS = 80;
+const FORMULAS_CONFIG = { engine: HyperFormula };
 
-const safeToText = (value: unknown): string => {
-  if (value == null) return "";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return `${value}`;
+const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
+  if (!Array.isArray(input?.sheets) || input.sheets.length === 0) {
+    return [{ name: "Sheet1", grid: [[""]] }];
   }
-  if (value instanceof Date) return value.toISOString();
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
+  return input.sheets.map((sheet, index) => ({
+    name: sheet?.name || `Sheet${index + 1}`,
+    grid: Array.isArray(sheet?.grid) && sheet.grid.length > 0 ? sheet.grid : [[""]],
+    mergeCells: Array.isArray(sheet?.mergeCells) ? sheet.mergeCells : [],
+    cellMeta: Array.isArray(sheet?.cellMeta) ? sheet.cellMeta : [],
+    colWidthsPx: Array.isArray(sheet?.colWidthsPx) ? sheet.colWidthsPx : undefined,
+    rowHeightsPx: Array.isArray(sheet?.rowHeightsPx) ? sheet.rowHeightsPx : undefined,
+    tabColor: sheet?.tabColor,
+  }));
 };
+const workbookSignature = (sheets: SheetData[]): string =>
+  sheets
+    .map((s) => {
+      const rows = s.grid?.length || 0;
+      const cols = s.grid?.[0]?.length || 0;
+      const merges = s.mergeCells?.length || 0;
+      const meta = s.cellMeta?.length || 0;
+      return `${s.name}|${rows}x${cols}|m${merges}|c${meta}|${s.tabColor || ""}`;
+    })
+    .join("::");
 
-const cellValueToString = (value: any): string => {
-  if (value == null) return "";
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if (typeof value === "object") {
-    if (Array.isArray(value.richText)) {
-      return value.richText.map((x: any) => x?.text ?? "").join("");
-    }
-    if (typeof value.text === "string") return value.text;
-    if (typeof value.hyperlink === "string" && typeof value.text === "string") return value.text;
-    if ("result" in value) return safeToText(value.result);
-    if ("formula" in value) return value.formula ? `=${safeToText(value.formula)}` : safeToText(value.result);
-    if ("error" in value) return safeToText(value.error);
-  }
-  return safeToText(value);
-};
 
-const decodeA1 = (a1: string) => {
-  const clean = a1.replace(/\$/g, "");
-  const m = clean.match(/^([A-Z]+)(\d+)$/i);
-  if (!m) return { row: 1, col: 1 };
-  const letters = m[1].toUpperCase();
-  let col = 0;
-  for (let i = 0; i < letters.length; i++) col = col * 26 + (letters.charCodeAt(i) - 64);
-  return { row: Number(m[2]), col };
-};
-
-const mergeStringToRegion = (merge: string) => {
-  const range = merge.includes("!") ? merge.split("!").pop() || merge : merge;
-  const parts = range.split(":");
-  const start = decodeA1(parts[0]);
-  const end = decodeA1(parts[1] || parts[0]);
-  return {
-    row: start.row - 1,
-    col: start.col - 1,
-    rowspan: Math.max(1, end.row - start.row + 1),
-    colspan: Math.max(1, end.col - start.col + 1),
-  };
-};
-
-const importWithXlsxFallback = async (buffer: ArrayBuffer): Promise<SheetData[]> => {
-  const wb = XLSX.read(buffer, { type: "array", cellDates: true });
-  const sheets: SheetData[] = [];
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name];
-    if (!ws) continue;
-    const ref = ws["!ref"] || "A1";
-    const range = XLSX.utils.decode_range(ref);
-    const rows = Math.max(1, range.e.r - range.s.r + 1);
-    const cols = Math.max(1, range.e.c - range.s.c + 1);
-    const grid = Array.from({ length: rows }, (_, r) =>
-      Array.from({ length: cols }, (_, c) => {
-        const addr = XLSX.utils.encode_cell({ r: r + range.s.r, c: c + range.s.c });
-        const cell = ws[addr] as any;
-        if (!cell) return "";
-        if (cell.w != null) return String(cell.w);
-        if (cell.v == null) return "";
-        return String(cell.v);
-      })
-    );
-    const merges = Array.isArray(ws["!merges"])
-      ? ws["!merges"].map((m: any) => ({
-          row: m.s.r - range.s.r,
-          col: m.s.c - range.s.c,
-          rowspan: m.e.r - m.s.r + 1,
-          colspan: m.e.c - m.s.c + 1,
-        }))
-      : [];
-    const colWidthsPx = Array.from({ length: cols }, (_, i) => {
-      const col = (ws["!cols"] || [])[i + range.s.c] as any;
-      if (col?.wpx) return Math.round(col.wpx);
-      if (col?.wch) return Math.round(col.wch * 7 + 8);
-      return 80;
-    });
-    const rowHeightsPx = Array.from({ length: rows }, (_, i) => {
-      const row = (ws["!rows"] || [])[i + range.s.r] as any;
-      if (row?.hpx) return Math.round(row.hpx);
-      if (row?.hpt) return Math.round((row.hpt * 96) / 72);
-      return 24;
-    });
-    sheets.push({
-      name: name || `Sheet${sheets.length + 1}`,
-      grid,
-      mergeCells: merges,
-      colWidthsPx,
-      rowHeightsPx,
-      cellMeta: [],
-    });
-  }
-  return sheets.length ? sheets : [{ name: "Sheet1", grid: [[""]] }];
-};
-
-const getClassToken = (prefix: string, raw: unknown): string | null => {
-  const text = safeToText(raw).trim();
-  if (!text) return null;
-  return `${prefix}${text.replace(/\s+/g, "_")}`;
-};
 
 const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   data,
   onChange,
   readOnly = false,
 }) => {
-  const importInputId = React.useId();
-  const importInputRef = React.useRef<HTMLInputElement | null>(null);
+  const initialSheets = React.useMemo(() => normalizeSheets(data), []);
+  const workbookRef = React.useRef<{ sheets: SheetData[] }>({ sheets: initialSheets });
+  const lastIncomingSignatureRef = React.useRef<string>(workbookSignature(initialSheets));
   const [activeSheetIndex, setActiveSheetIndex] = React.useState(0);
+  const [sheetTabs, setSheetTabs] = React.useState<Array<{ name: string; tabColor?: string }>>(
+    workbookRef.current.sheets.map((s) => ({ name: s.name, tabColor: s.tabColor }))
+  );
+  const [initialGrid, setInitialGrid] = React.useState<string[][]>(() => {
+    const first = workbookRef.current.sheets[0];
+    const base = Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
+    if (!readOnly) return base;
+    const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
+    const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
+    return base.slice(0, rows).map((row) => (Array.isArray(row) ? row.slice(0, cols) : []));
+  });
   const [renaming, setRenaming] = React.useState(false);
   const [renameValue, setRenameValue] = React.useState("");
   const [formulaInput, setFormulaInput] = React.useState("");
@@ -161,34 +86,50 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   const [fontSize, setFontSize] = React.useState("12");
   const [textColor, setTextColor] = React.useState("#111827");
   const [fillColor, setFillColor] = React.useState("#ffffff");
+  const [selectedAlign, setSelectedAlign] = React.useState<"left" | "center" | "right" | null>(null);
   const [fixedRowsTop, setFixedRowsTop] = React.useState(0);
   const [fixedColumnsStart, setFixedColumnsStart] = React.useState(0);
-  const [toolbarError, setToolbarError] = React.useState("");
   const hotRef = React.useRef<any>(null);
-  const safeSheets =
-    Array.isArray(data?.sheets) && data.sheets.length > 0
-      ? data.sheets
-      : [{ name: "Sheet1", grid: [[""]] }];
-  const activeSheet = safeSheets[Math.min(activeSheetIndex, safeSheets.length - 1)];
+  const safeSheets = workbookRef.current.sheets;
+  const activeSheet = safeSheets[Math.min(activeSheetIndex, safeSheets.length - 1)] || safeSheets[0];
   const safeGrid =
     Array.isArray(activeSheet?.grid) && activeSheet.grid.length > 0 ? activeSheet.grid : [[""]];
+  const previewRows = readOnly ? Math.min(MAX_PREVIEW_ROWS, safeGrid.length) : safeGrid.length;
+  const previewCols = readOnly ? Math.min(MAX_PREVIEW_COLS, safeGrid[0]?.length || 0) : (safeGrid[0]?.length || 0);
+  const renderedGrid = readOnly
+    ? safeGrid.slice(0, previewRows).map((row) => (Array.isArray(row) ? row.slice(0, previewCols) : []))
+    : safeGrid;
+  const isPreviewTruncated =
+    readOnly && (safeGrid.length > previewRows || (safeGrid[0]?.length || 0) > previewCols);
+  const renderedMergeCells = (activeSheet.mergeCells || []).filter(
+    (m) =>
+      m.row < previewRows &&
+      m.col < previewCols &&
+      m.row + m.rowspan <= previewRows &&
+      m.col + m.colspan <= previewCols
+  );
+  const renderedColWidths = readOnly ? (activeSheet.colWidthsPx || []).slice(0, previewCols) : activeSheet.colWidthsPx;
+  const renderedRowHeights = readOnly ? (activeSheet.rowHeightsPx || []).slice(0, previewRows) : activeSheet.rowHeightsPx;
+  const currentCellCount = renderedGrid.length * (renderedGrid[0]?.length || 0);
+  const shouldUseFormulaEngine = !readOnly && currentCellCount <= 20000;
+  const shouldApplyCellRenderer = !readOnly;
   const cellMetaMap = React.useMemo(() => {
     const map = new Map<string, { className?: string; readOnly?: boolean }>();
     for (const meta of activeSheet?.cellMeta || []) {
-      map.set(`${meta.row}:${meta.col}`, { className: meta.className, readOnly: meta.readOnly });
+      map.set(`${meta.row}:${meta.col}`, {
+        className: meta.className,
+        readOnly: meta.readOnly,
+      });
     }
     return map;
-  }, [activeSheet?.cellMeta]);
+  }, [activeSheet]);
 
-  const emitWorkbook = (nextSheet: SheetData) => {
-    const nextSheets = safeSheets.map((sheet, index) =>
-      index === activeSheetIndex ? nextSheet : sheet
-    );
-    onChange({ sheets: nextSheets });
-  };
-
-  const collectAndEmitMeta = (nextGrid: string[][], includeMeta: boolean) => {
+  const collectCurrentSheetFromHot = (includeMeta: boolean) => {
     const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
+    const nextGrid = (hot.getData?.() || []).map((row: any[]) =>
+      row.map((cell) => (cell == null ? "" : String(cell)))
+    );
     const mergeCells =
       hot?.getPlugin?.("mergeCells")?.mergedCellsCollection?.mergedCells?.map((cell: any) => ({
         row: cell.row,
@@ -196,7 +137,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         rowspan: cell.rowspan,
         colspan: cell.colspan,
       })) || [];
-    let cellMeta = activeSheet.cellMeta;
+    let cellMeta = workbookRef.current.sheets[activeSheetIndex]?.cellMeta || [];
     if (includeMeta) {
       const nextMeta: Array<{ row: number; col: number; className?: string; readOnly?: boolean }> = [];
       for (let r = 0; r < nextGrid.length; r++) {
@@ -214,23 +155,15 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       }
       cellMeta = nextMeta;
     }
-    emitWorkbook({
-      ...activeSheet,
+    const current = workbookRef.current.sheets[activeSheetIndex] || { name: `Sheet${activeSheetIndex + 1}`, grid: [[""]] };
+    workbookRef.current.sheets[activeSheetIndex] = {
+      ...current,
       grid: nextGrid,
       mergeCells,
       cellMeta,
-      colWidthsPx: hot?.getColHeader?.() ? activeSheet.colWidthsPx : activeSheet.colWidthsPx,
-      rowHeightsPx: activeSheet.rowHeightsPx,
-    });
-  };
-
-  const syncFromHot = (includeMeta = false) => {
-    const hot = hotRef.current?.hotInstance;
-    if (!hot) return;
-    const next = (hot.getData?.() || safeGrid).map((row: any[]) =>
-      row.map((cell) => (cell == null ? "" : String(cell)))
-    );
-    collectAndEmitMeta(next, includeMeta);
+      colWidthsPx: current.colWidthsPx,
+      rowHeightsPx: current.rowHeightsPx,
+    };
   };
 
   const getSelectedRange = () => {
@@ -249,10 +182,65 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     };
   };
 
-  const applyClassToSelection = (classToken: string, toggle = false) => {
+  const loadSheetIntoHot = React.useCallback((targetIndex: number) => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
+    const sheet = workbookRef.current.sheets[targetIndex];
+    if (!sheet) return;
+    const baseGrid = sheet.grid?.length ? sheet.grid : [[""]];
+    const rows = readOnly ? Math.min(MAX_PREVIEW_ROWS, baseGrid.length) : baseGrid.length;
+    const cols = readOnly ? Math.min(MAX_PREVIEW_COLS, baseGrid[0]?.length || 0) : (baseGrid[0]?.length || 0);
+    const visibleGrid = readOnly
+      ? baseGrid.slice(0, rows).map((row) => (Array.isArray(row) ? row.slice(0, cols) : []))
+      : baseGrid;
+    setInitialGrid(visibleGrid);
+    hot.loadData(visibleGrid);
+    if (!readOnly) {
+      for (const meta of sheet.cellMeta || []) {
+        if (meta.className) hot.setCellMeta(meta.row, meta.col, "className", meta.className);
+        if (meta.readOnly) hot.setCellMeta(meta.row, meta.col, "readOnly", true);
+      }
+    }
+    hot.render();
+  }, [readOnly]);
+
+  const handleSheetSwitch = (targetIndex: number) => {
+    if (targetIndex === activeSheetIndex) return;
+    if (!readOnly) {
+      collectCurrentSheetFromHot(true);
+    }
+    setActiveSheetIndex(targetIndex);
+    setTimeout(() => loadSheetIntoHot(targetIndex), 0);
+  };
+
+  const emitWorkbookSnapshot = () => {
+    if (!readOnly) collectCurrentSheetFromHot(true);
+    onChange({ sheets: workbookRef.current.sheets });
+  };
+
+  React.useEffect(() => {
+    const nextSheets = normalizeSheets(data);
+    const incomingSig = workbookSignature(nextSheets);
+    if (incomingSig === lastIncomingSignatureRef.current) return;
+    lastIncomingSignatureRef.current = incomingSig;
+    workbookRef.current = { sheets: nextSheets };
+    setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
+    setActiveSheetIndex(0);
+    const first = nextSheets[0]?.grid?.length ? nextSheets[0].grid : [[""]];
+    if (!readOnly) {
+      setInitialGrid(first);
+    } else {
+      const rows = Math.min(MAX_PREVIEW_ROWS, first.length);
+      const cols = Math.min(MAX_PREVIEW_COLS, first[0]?.length || 0);
+      setInitialGrid(first.slice(0, rows).map((row) => (Array.isArray(row) ? row.slice(0, cols) : [])));
+    }
+  }, [data, readOnly]);
+
+  const applyClassToSelection = (classToken: string, toggle = false, replacePrefix?: string) => {
     const hot = hotRef.current?.hotInstance;
     const range = getSelectedRange();
     if (!hot || !range || readOnly) return;
+    const tokenPrefix = replacePrefix || classToken;
     for (let r = range.startRow; r <= range.endRow; r++) {
       for (let c = range.startCol; c <= range.endCol; c++) {
         const current = String(hot.getCellMeta(r, c)?.className || "")
@@ -263,16 +251,17 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           ? has
             ? current.filter((x: string) => x !== classToken)
             : [...current, classToken]
-          : [...current.filter((x: string) => !x.startsWith(classToken.split("-")[0] + "-")), classToken];
+          : [...current.filter((x: string) => !x.startsWith(tokenPrefix)), classToken];
         hot.setCellMeta(r, c, "className", next.join(" ").trim());
       }
     }
     hot.render();
-    syncFromHot(true);
+    collectCurrentSheetFromHot(true);
   };
 
   const setAlignment = (align: "left" | "center" | "right") => {
-    applyClassToSelection(`meta-align-${align}`);
+    applyClassToSelection(`meta-align-${align}`, false, "meta-align-");
+    setSelectedAlign(align);
   };
 
   const setWrapText = () => {
@@ -283,10 +272,10 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     applyClassToSelection(`meta-${style}`, true);
   };
 
-  const applyFontFamily = () => applyClassToSelection(`meta-font-${fontFamily.replace(/\s+/g, "_")}`);
-  const applyFontSize = () => applyClassToSelection(`meta-size-${fontSize}`);
-  const applyTextColor = () => applyClassToSelection(`meta-color-${textColor.replace("#", "")}`);
-  const applyFillColor = () => applyClassToSelection(`meta-fill-${fillColor.replace("#", "")}`);
+  const applyFontFamily = () => applyClassToSelection(`meta-font-${fontFamily.replace(/\s+/g, "_")}`, false, "meta-font-");
+  const applyFontSize = () => applyClassToSelection(`meta-size-${fontSize}`, false, "meta-size-");
+  const applyTextColor = () => applyClassToSelection(`meta-color-${textColor.replace("#", "")}`, false, "meta-color-");
+  const applyFillColor = () => applyClassToSelection(`meta-fill-${fillColor.replace("#", "")}`, false, "meta-fill-");
 
   const formatSelectedAs = (kind: "number" | "currency" | "percent" | "date") => {
     const hot = hotRef.current?.hotInstance;
@@ -307,7 +296,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         }
       }
     }
-    syncFromHot(true);
+    collectCurrentSheetFromHot(true);
   };
 
   const applyDropdownValidation = () => {
@@ -326,7 +315,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       }
     }
     hot.render();
-    syncFromHot(true);
+    collectCurrentSheetFromHot(true);
   };
 
   const applyDateCellType = () => {
@@ -341,7 +330,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       }
     }
     hot.render();
-    syncFromHot(true);
+    collectCurrentSheetFromHot(true);
   };
 
   const sortSelectedColumn = (order: "asc" | "desc") => {
@@ -363,92 +352,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         }
       }
     }
-    syncFromHot();
-  };
-
-  const importXlsx = async (file: File) => {
-    setToolbarError("");
-    try {
-      if (!/\.xlsx$/i.test(file.name)) {
-        setToolbarError("Only .xlsx files are supported.");
-        return;
-      }
-      const buffer = await file.arrayBuffer();
-      const workbook = new ExcelJS.Workbook();
-      let nextSheets: SheetData[] = [];
-      try {
-        await workbook.xlsx.load(buffer);
-        nextSheets = workbook.worksheets.map((ws, idx) => {
-      const rows = Math.max(ws.rowCount || 1, 1);
-      const cols = Math.max(ws.columnCount || 1, 1);
-      const grid = Array.from({ length: rows }, (_, r) =>
-        Array.from({ length: cols }, (_, c) => {
-          const cell = ws.getCell(r + 1, c + 1);
-          // Prefer Excel's rendered text to avoid [object Object] and preserve display value
-          const displayed = typeof cell.text === "string" ? cell.text : "";
-          if (displayed) return displayed;
-          return cellValueToString(cell.value);
-        })
-      );
-      const mergeCells = (Array.isArray((ws.model as any)?.merges) ? (ws.model as any).merges : [])
-        .filter((m: unknown) => typeof m === "string" && m.length > 0)
-        .map((m: string) => mergeStringToRegion(m));
-      const cellMeta: Array<{ row: number; col: number; className?: string; readOnly?: boolean }> = [];
-      for (let r = 1; r <= rows; r++) {
-        for (let c = 1; c <= cols; c++) {
-          const cell = ws.getCell(r, c);
-          const tokens: string[] = [];
-          const font = cell.font as any;
-          const fill = cell.fill as any;
-          const alignment = cell.alignment as any;
-          if (font?.bold) tokens.push("meta-bold");
-          if (font?.italic) tokens.push("meta-italic");
-          if (font?.underline) tokens.push("meta-underline");
-          if (font?.strike) tokens.push("meta-strike");
-          const fontToken = getClassToken("meta-font-", font?.name);
-          if (fontToken) tokens.push(fontToken);
-          const sizeToken = getClassToken("meta-size-", font?.size);
-          if (sizeToken) tokens.push(sizeToken);
-          const fontHex = argbToHex(font?.color?.argb);
-          if (fontHex) tokens.push(`meta-color-${fontHex.replace("#", "").toLowerCase()}`);
-          const fillHex = argbToHex(fill?.fgColor?.argb || fill?.bgColor?.argb);
-          if (fillHex) tokens.push(`meta-fill-${fillHex.replace("#", "").toLowerCase()}`);
-          if (alignment?.horizontal === "left") tokens.push("meta-align-left");
-          if (alignment?.horizontal === "center") tokens.push("meta-align-center");
-          if (alignment?.horizontal === "right") tokens.push("meta-align-right");
-          if (alignment?.wrapText) tokens.push("meta-wrap");
-          if (tokens.length) {
-            cellMeta.push({
-              row: r - 1,
-              col: c - 1,
-              className: tokens.join(" "),
-            });
-          }
-        }
-      }
-      const colWidthsPx = Array.from({ length: cols }, (_, i) => {
-        const w = ws.getColumn(i + 1).width;
-        return typeof w === "number" && w > 0 ? Math.round(w * 7 + 8) : 80;
-      });
-      const rowHeightsPx = Array.from({ length: rows }, (_, i) => {
-        const h = ws.getRow(i + 1).height;
-        return typeof h === "number" && h > 0 ? Math.round((h * 96) / 72) : 24;
-      });
-      return { name: ws.name || `Sheet${idx + 1}`, grid, mergeCells, cellMeta, colWidthsPx, rowHeightsPx };
-        });
-      } catch {
-        // Fallback parser for workbooks ExcelJS cannot load.
-        nextSheets = await importWithXlsxFallback(buffer);
-      }
-      onChange({ sheets: nextSheets.length ? nextSheets : [{ name: "Sheet1", grid: [[""]] }] });
-      setActiveSheetIndex(0);
-    } catch (error: any) {
-      const rawMessage =
-        typeof error?.message === "string"
-          ? error.message
-          : "Unknown parse error";
-      setToolbarError(`Import failed: ${rawMessage}`);
-    }
+    collectCurrentSheetFromHot(false);
   };
 
   const exportXlsx = async () => {
@@ -482,8 +386,10 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const cloned = JSON.parse(JSON.stringify(activeSheet)) as SheetData;
     cloned.name = `${activeSheet.name} Copy`;
     const nextSheets = [...safeSheets, cloned];
-    onChange({ sheets: nextSheets });
+    workbookRef.current.sheets = nextSheets;
+    setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
     setActiveSheetIndex(nextSheets.length - 1);
+    setTimeout(() => loadSheetIntoHot(nextSheets.length - 1), 0);
   };
 
   const moveSheet = (direction: "left" | "right") => {
@@ -493,15 +399,18 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const next = [...safeSheets];
     const [moved] = next.splice(idx, 1);
     next.splice(target, 0, moved);
-    onChange({ sheets: next });
+    workbookRef.current.sheets = next;
+    setSheetTabs(next.map((s) => ({ name: s.name, tabColor: s.tabColor })));
     setActiveSheetIndex(target);
+    setTimeout(() => loadSheetIntoHot(target), 0);
   };
 
   const applySheetColor = (color: string) => {
     const nextSheets = safeSheets.map((s, idx) =>
       idx === activeSheetIndex ? { ...s, tabColor: color } : s
     );
-    onChange({ sheets: nextSheets });
+    workbookRef.current.sheets = nextSheets;
+    setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
   };
 
   const applyFormulaBar = () => {
@@ -509,7 +418,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const range = getSelectedRange();
     if (!hot || !range || readOnly) return;
     hot.setDataAtCell(range.startRow, range.startCol, formulaInput);
-    syncFromHot();
+    collectCurrentSheetFromHot(false);
   };
 
   return (
@@ -541,9 +450,30 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           <Button type="button" size="sm" variant="outline" onClick={applyTextColor}>Text</Button>
           <input type="color" value={fillColor} onChange={(e) => setFillColor(e.target.value)} className="w-8 h-8 p-0 border rounded" />
           <Button type="button" size="sm" variant="outline" onClick={applyFillColor}>Fill</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setAlignment("left")}>Left</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setAlignment("center")}>Center</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setAlignment("right")}>Right</Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={selectedAlign === "left" ? "default" : "outline"}
+            onClick={() => setAlignment("left")}
+          >
+            Left
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={selectedAlign === "center" ? "default" : "outline"}
+            onClick={() => setAlignment("center")}
+          >
+            Center
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={selectedAlign === "right" ? "default" : "outline"}
+            onClick={() => setAlignment("right")}
+          >
+            Right
+          </Button>
           <Button type="button" size="sm" variant="outline" onClick={setWrapText}>Wrap</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => formatSelectedAs("number")}>123</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => formatSelectedAs("currency")}>$</Button>
@@ -554,33 +484,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           <input value={findValue} onChange={(e) => setFindValue(e.target.value)} placeholder="Find" className="h-8 px-2 text-sm border rounded" />
           <input value={replaceValue} onChange={(e) => setReplaceValue(e.target.value)} placeholder="Replace" className="h-8 px-2 text-sm border rounded" />
           <Button type="button" size="sm" variant="outline" onClick={doFindReplace}>Replace</Button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            id={importInputId}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) importXlsx(file);
-              e.currentTarget.value = "";
-            }}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => importInputRef.current?.click()}
-          >
-            Import .xlsx
-          </Button>
+          <Button type="button" size="sm" variant="default" onClick={emitWorkbookSnapshot}>Save Workbook</Button>
           <Button type="button" size="sm" variant="outline" onClick={exportXlsx}>Export .xlsx</Button>
           <Button type="button" size="sm" variant="outline" onClick={exportCsv}>CSV</Button>
-        </div>
-      )}
-      {!!toolbarError && (
-        <div className="px-2 py-1 text-xs text-red-700 border border-red-200 rounded bg-red-50">
-          {toolbarError}
         </div>
       )}
 
@@ -600,14 +506,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {safeSheets.map((sheet, index) => (
+        {sheetTabs.map((sheet, index) => (
           <Button
             key={`${sheet.name}-${index}`}
             type="button"
             variant={index === activeSheetIndex ? "default" : "outline"}
             size="sm"
             style={sheet.tabColor ? { backgroundColor: sheet.tabColor, color: "#111827" } : undefined}
-            onClick={() => setActiveSheetIndex(index)}
+            onClick={() => handleSheetSwitch(index)}
           >
             {sheet.name}
           </Button>
@@ -632,7 +538,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                   const nextSheets = safeSheets.map((sheet, index) =>
                     index === activeSheetIndex ? { ...sheet, name: nextName } : sheet
                   );
-                  onChange({ sheets: nextSheets });
+                  workbookRef.current.sheets = nextSheets;
+                  setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
                   setRenaming(false);
                 }}
               >
@@ -671,8 +578,10 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                 ...safeSheets,
                 { name: `Sheet${safeSheets.length + 1}`, grid: [[""]] },
               ];
-              onChange({ sheets: nextSheets });
+              workbookRef.current.sheets = nextSheets;
+              setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
               setActiveSheetIndex(nextSheets.length - 1);
+              setTimeout(() => loadSheetIntoHot(nextSheets.length - 1), 0);
             }}
           >
             + Add Sheet
@@ -718,7 +627,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       <div className="overflow-hidden border rounded-md">
       <HotTable
         ref={hotRef}
-        data={safeGrid}
+        data={initialGrid}
         themeName="ht-theme-main"
         rowHeaders
         colHeaders
@@ -727,18 +636,18 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         width="100%"
         stretchH="all"
         height={320}
-        formulas={{ engine: HyperFormula }}
-        mergeCells={activeSheet.mergeCells || true}
-        filters
-        dropdownMenu
-        columnSorting
+        formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
+        mergeCells={readOnly ? renderedMergeCells : (renderedMergeCells.length > 0 ? renderedMergeCells : true)}
+        filters={!readOnly}
+        dropdownMenu={!readOnly}
+        columnSorting={!readOnly}
         hiddenRows={{ indicators: true }}
         hiddenColumns={{ indicators: true }}
-        multiColumnSorting
-        manualColumnFreeze
-        autoColumnSize
-        autoRowSize
-        fillHandle
+        multiColumnSorting={!readOnly}
+        manualColumnFreeze={!readOnly}
+        autoColumnSize={false}
+        autoRowSize={false}
+        fillHandle={!readOnly}
         fixedRowsTop={fixedRowsTop}
         fixedColumnsStart={fixedColumnsStart}
         contextMenu={
@@ -774,84 +683,86 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
               }
         }
         className="ht-theme-main"
-        manualRowResize
-        manualColumnResize
-        colWidths={activeSheet.colWidthsPx as any}
-        rowHeights={activeSheet.rowHeightsPx as any}
+        manualRowResize={!readOnly}
+        manualColumnResize={!readOnly}
+        colWidths={renderedColWidths as any}
+        rowHeights={renderedRowHeights as any}
         wordWrap
         autoWrapRow
         autoWrapCol
-        cells={(row, col) => {
-          const meta = cellMetaMap.get(`${row}:${col}`);
-          const cp: any = {};
-          if (meta?.className) cp.className = meta.className;
-          if (meta?.readOnly) cp.readOnly = true;
-          const tokens = (meta?.className || "").split(" ").filter(Boolean);
-          const fontToken = tokens.find((t) => t.startsWith("meta-font-"));
-          const sizeToken = tokens.find((t) => t.startsWith("meta-size-"));
-          const colorToken = tokens.find((t) => t.startsWith("meta-color-"));
-          const fillToken = tokens.find((t) => t.startsWith("meta-fill-"));
-          if (fontToken || sizeToken || colorToken || fillToken) {
-            cp.renderer = (
-              instance: any,
-              td: HTMLTableCellElement,
-              rowIndex: number,
-              colIndex: number,
-              prop: any,
-              value: any,
-              cellProperties: any
-            ) => {
-              const base = (window as any).Handsontable?.renderers?.TextRenderer;
-              if (base) {
-                base(instance, td, rowIndex, colIndex, prop, value, cellProperties);
-              } else {
-                td.textContent = value == null ? "" : String(value);
+        cells={
+          shouldApplyCellRenderer
+            ? (row, col) => {
+                const meta = cellMetaMap.get(`${row}:${col}`);
+                const cp: any = {};
+                if (meta?.className) cp.className = meta.className;
+                if (meta?.readOnly) cp.readOnly = true;
+                const tokens = (meta?.className || "").split(" ").filter(Boolean);
+                const fontToken = tokens.find((t: string) => t.startsWith("meta-font-"));
+                const sizeToken = tokens.find((t: string) => t.startsWith("meta-size-"));
+                const colorToken = tokens.find((t: string) => t.startsWith("meta-color-"));
+                const fillToken = tokens.find((t: string) => t.startsWith("meta-fill-"));
+                if (fontToken || sizeToken || colorToken || fillToken) {
+                  cp.renderer = (
+                    instance: any,
+                    td: HTMLTableCellElement,
+                    rowIndex: number,
+                    colIndex: number,
+                    prop: any,
+                    value: any,
+                    cellProperties: any
+                  ) => {
+                    const base = (window as any).Handsontable?.renderers?.TextRenderer;
+                    if (base) {
+                      base(instance, td, rowIndex, colIndex, prop, value, cellProperties);
+                    } else {
+                      td.textContent = value == null ? "" : String(value);
+                    }
+                    if (fontToken) td.style.fontFamily = fontToken.replace("meta-font-", "").split("_").join(" ");
+                    if (sizeToken) td.style.fontSize = `${sizeToken.replace("meta-size-", "")}px`;
+                    if (colorToken) td.style.color = `#${colorToken.replace("meta-color-", "")}`;
+                    if (fillToken) td.style.backgroundColor = `#${fillToken.replace("meta-fill-", "")}`;
+                    return td;
+                  };
+                }
+                return cp;
               }
-              if (fontToken) td.style.fontFamily = fontToken.replace("meta-font-", "").split("_").join(" ");
-              if (sizeToken) td.style.fontSize = `${sizeToken.replace("meta-size-", "")}px`;
-              if (colorToken) td.style.color = `#${colorToken.replace("meta-color-", "")}`;
-              if (fillToken) td.style.backgroundColor = `#${fillToken.replace("meta-fill-", "")}`;
-              return td;
-            };
-          }
-          return cp;
-        }}
-        afterChange={(changes, source) => {
-          if (!changes || source === "loadData" || readOnly) return;
-          syncFromHot(false);
+            : undefined
+        }
+        afterChange={() => {
+          // Keep Handsontable fully in charge during editing.
+          // We only sync to ref on explicit save or sheet switch.
         }}
         afterSelectionEnd={(r, c) => {
           const hot = hotRef.current?.hotInstance;
           if (!hot) return;
           const v = hot.getDataAtCell(r, c);
           setFormulaInput(v == null ? "" : String(v));
+          const cls = String(hot.getCellMeta(r, c)?.className || "");
+          if (cls.includes("meta-align-left")) setSelectedAlign("left");
+          else if (cls.includes("meta-align-center")) setSelectedAlign("center");
+          else if (cls.includes("meta-align-right")) setSelectedAlign("right");
+          else setSelectedAlign(null);
         }}
         afterMergeCells={() => {
           if (readOnly) return;
-          syncFromHot(true);
+          collectCurrentSheetFromHot(true);
         }}
         afterUnmergeCells={() => {
           if (readOnly) return;
-          syncFromHot(true);
+          collectCurrentSheetFromHot(true);
         }}
-        afterCreateRow={() => {
-          if (readOnly) return;
-          syncFromHot(false);
-        }}
-        afterCreateCol={() => {
-          if (readOnly) return;
-          syncFromHot(false);
-        }}
-        afterRemoveRow={() => {
-          if (readOnly) return;
-          syncFromHot(false);
-        }}
-        afterRemoveCol={() => {
-          if (readOnly) return;
-          syncFromHot(false);
-        }}
+        afterCreateRow={() => {}}
+        afterCreateCol={() => {}}
+        afterRemoveRow={() => {}}
+        afterRemoveCol={() => {}}
       />
     </div>
+    {isPreviewTruncated && (
+      <div className="px-2 py-1 text-xs text-amber-700 border border-amber-200 rounded bg-amber-50">
+        Preview mode showing first {previewRows} rows x {previewCols} columns for stability.
+      </div>
+    )}
     </div>
   );
 };

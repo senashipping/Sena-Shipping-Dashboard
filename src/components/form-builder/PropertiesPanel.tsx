@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import { Plus, Trash2, X } from "lucide-react";
 import { FormField, FormSection, TableConfig, TableColumn } from "../../types";
 import { useToast } from "../ui/toast";
+import * as XLSX from "xlsx";
 
 interface PropertiesPanelProps {
   selectedItem: {
@@ -29,6 +30,11 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const [sheetRows, setSheetRows] = React.useState(10);
   const [sheetCols, setSheetCols] = React.useState(6);
   const [sheetCount, setSheetCount] = React.useState(1);
+  const [isImportingTemplate, setIsImportingTemplate] = React.useState(false);
+  const importTemplateInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const MAX_IMPORT_ROWS = 650;
+  const MAX_IMPORT_COLS = 120;
 
   if (!selectedItem) {
     return (
@@ -40,6 +46,97 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       </div>
     );
   }
+
+  const importWorkbookTemplate = async (file: File) => {
+    if (isImportingTemplate) return;
+    setIsImportingTemplate(true);
+    try {
+      if (!/\.xlsx$/i.test(file.name)) {
+        toast({
+          title: "Import failed",
+          description: "Only .xlsx files are supported.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+      const sheets = workbook.SheetNames.map((name, index) => {
+        const ws = workbook.Sheets[name];
+        const ref = ws?.["!ref"] || "A1";
+        const range = XLSX.utils.decode_range(ref);
+        const rows = Math.min(MAX_IMPORT_ROWS, Math.max(1, range.e.r - range.s.r + 1));
+        const cols = Math.min(MAX_IMPORT_COLS, Math.max(1, range.e.c - range.s.c + 1));
+
+        const grid = Array.from({ length: rows }, (_, r) =>
+          Array.from({ length: cols }, (_, c) => {
+            const addr = XLSX.utils.encode_cell({ r: r + range.s.r, c: c + range.s.c });
+            const cell = ws?.[addr] as { w?: unknown; v?: unknown } | undefined;
+            if (!cell) return "";
+            if (cell.w != null) return String(cell.w);
+            if (cell.v == null) return "";
+            return String(cell.v);
+          })
+        );
+
+        const merges = Array.isArray(ws?.["!merges"])
+          ? ws["!merges"].map((m: any) => ({
+              row: m.s.r - range.s.r,
+              col: m.s.c - range.s.c,
+              rowspan: m.e.r - m.s.r + 1,
+              colspan: m.e.c - m.s.c + 1,
+            }))
+          : [];
+
+        const colWidthsPx = Array.from({ length: cols }, (_, i) => {
+          const col = (ws?.["!cols"] || [])[i + range.s.c] as any;
+          if (col?.wpx) return Math.round(col.wpx);
+          if (col?.wch) return Math.round(col.wch * 7 + 8);
+          return 80;
+        });
+
+        const rowHeightsPx = Array.from({ length: rows }, (_, i) => {
+          const row = (ws?.["!rows"] || [])[i + range.s.r] as any;
+          if (row?.hpx) return Math.round(row.hpx);
+          if (row?.hpt) return Math.round((row.hpt * 96) / 72);
+          return 24;
+        });
+
+        return {
+          name: name || `Sheet${index + 1}`,
+          grid,
+          mergeCells: merges,
+          colWidthsPx,
+          rowHeightsPx,
+          cellMeta: [],
+        };
+      });
+
+      onUpdate({
+        excelTemplate: {
+          sheets: sheets.length ? sheets : [{ name: "Sheet1", grid: [[""]] }],
+        },
+        excelFileDataUrl: "",
+        excelDisplayName: "",
+        excelFileUrl: "",
+      });
+
+      toast({
+        title: "Workbook imported",
+        description: `${sheets.length || 1} sheet(s) loaded into template`,
+        variant: "success",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Import failed",
+        description: typeof error?.message === "string" ? error.message : "Could not read workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsImportingTemplate(false);
+    }
+  };
 
   const renderFieldProperties = (field: FormField) => (
     <div className="space-y-4">
@@ -114,6 +211,30 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         <div className="space-y-3">
           <div>
             <Label>Spreadsheet Template</Label>
+            <input
+              ref={importTemplateInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  void importWorkbookTemplate(file);
+                }
+                e.currentTarget.value = "";
+              }}
+            />
+            <div className="flex gap-2 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isImportingTemplate}
+                onClick={() => importTemplateInputRef.current?.click()}
+              >
+                {isImportingTemplate ? "Importing..." : "Import .xlsx Template"}
+              </Button>
+            </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
               <div>
                 <Label htmlFor="sheet-rows" className="text-sm">Rows</Label>

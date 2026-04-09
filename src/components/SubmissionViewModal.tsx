@@ -18,7 +18,7 @@ import { Button } from "./ui/button";
 import SubmissionPdfDocument from "./pdf/SubmissionPdfDocument";
 import { downloadPdfDocument } from "../lib/pdfDownload";
 import { useToast } from "./ui/toast";
-import EmbeddedExcelWorkbook from "./form-builder/EmbeddedExcelWorkbook";
+import HandsontableWorkbook from "./form-builder/HandsontableWorkbook";
 
 interface SubmissionViewModalProps {
   submissionId: string | null;
@@ -169,12 +169,14 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
           ) : 'No file uploaded';
           break;
         case 'embedded_excel': {
-          const excelSrc = field.excelFileDataUrl || field.excelFileUrl;
-          value = excelSrc ? (
+          const workbookData =
+            data[field.name]?.sheets?.length
+              ? data[field.name]
+              : field.excelTemplate;
+          value = workbookData?.sheets?.length ? (
             <div className="max-h-[min(70vh,520px)] overflow-auto border rounded-md bg-background">
-              <EmbeddedExcelWorkbook
-                excelSource={excelSrc}
-                value={data[field.name]}
+              <HandsontableWorkbook
+                data={workbookData}
                 onChange={() => {}}
                 readOnly
               />

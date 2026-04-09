@@ -90,6 +90,7 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState }) => {
       onMixedTableChange={handleMixedTableChange}
       onAddTableRow={handleAddTableRow}
       onRemoveTableRow={handleRemoveTableRow}
+      useLocalExcelState
       submitButton={submitButton}
     />
   );
