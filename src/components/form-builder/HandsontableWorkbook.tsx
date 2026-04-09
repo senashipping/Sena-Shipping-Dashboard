@@ -13,7 +13,17 @@ type SheetData = {
   name: string;
   grid: string[][];
   mergeCells?: Array<{ row: number; col: number; rowspan: number; colspan: number }>;
-  cellMeta?: Array<{ row: number; col: number; className?: string }>;
+  cellMeta?: Array<{
+    row: number;
+    col: number;
+    className?: string;
+    type?: string;
+    dateFormat?: string;
+    correctFormat?: boolean;
+    numericFormat?: { pattern?: string; culture?: string };
+    source?: string[];
+    strict?: boolean;
+  }>;
   images?: Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }>;
   colWidthsPx?: number[];
   rowHeightsPx?: number[];
@@ -73,7 +83,23 @@ const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
               Number.isFinite(Number(m.row)) &&
               Number.isFinite(Number(m.col))
           )
-          .map((m: any) => ({ row: Number(m.row), col: Number(m.col), className: m.className }))
+          .map((m: any) => ({
+            row: Number(m.row),
+            col: Number(m.col),
+            className: typeof m.className === "string" ? m.className : undefined,
+            type: typeof m.type === "string" ? m.type : undefined,
+            dateFormat: typeof m.dateFormat === "string" ? m.dateFormat : undefined,
+            correctFormat: typeof m.correctFormat === "boolean" ? m.correctFormat : undefined,
+            numericFormat:
+              m.numericFormat && typeof m.numericFormat === "object"
+                ? {
+                    pattern: typeof m.numericFormat.pattern === "string" ? m.numericFormat.pattern : undefined,
+                    culture: typeof m.numericFormat.culture === "string" ? m.numericFormat.culture : undefined,
+                  }
+                : undefined,
+            source: Array.isArray(m.source) ? m.source.map((v: any) => String(v)) : undefined,
+            strict: typeof m.strict === "boolean" ? m.strict : undefined,
+          }))
       : [],
     images: Array.isArray((sheet as any)?.images)
       ? (sheet as any).images.filter(
@@ -139,6 +165,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   const [isStrikeActive, setIsStrikeActive] = React.useState(false);
   const [selectedAlign, setSelectedAlign] = React.useState<"left" | "center" | "right" | "justify" | null>(null);
   const [selectedVAlign, setSelectedVAlign] = React.useState<"top" | "middle" | "bottom" | null>(null);
+  const [selectionLabel, setSelectionLabel] = React.useState("A1");
+  const [canUndo, setCanUndo] = React.useState(false);
+  const [canRedo, setCanRedo] = React.useState(false);
   const [formatAllCells, setFormatAllCells] = React.useState(false);
   const lastSelectionRef = React.useRef<{ startRow: number; endRow: number; startCol: number; endCol: number } | null>(null);
   const sheetSelectionRef = React.useRef<Record<number, { startRow: number; endRow: number; startCol: number; endCol: number }>>({});
@@ -189,10 +218,27 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   }, [activeSheet]);
   const shouldApplyCellRenderer = !readOnly || imageMap.size > 0;
   const persistedCellMetaMap = React.useMemo(() => {
-    const map = new Map<string, { className?: string }>();
+    const map = new Map<
+      string,
+      {
+        className?: string;
+        type?: string;
+        dateFormat?: string;
+        correctFormat?: boolean;
+        numericFormat?: { pattern?: string; culture?: string };
+        source?: string[];
+        strict?: boolean;
+      }
+    >();
     for (const meta of activeSheet?.cellMeta || []) {
       map.set(`${meta.row}:${meta.col}`, {
         className: meta.className,
+        type: meta.type,
+        dateFormat: meta.dateFormat,
+        correctFormat: meta.correctFormat,
+        numericFormat: meta.numericFormat,
+        source: meta.source,
+        strict: meta.strict,
       });
     }
     return map;
@@ -214,20 +260,56 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     let cellMeta = workbookRef.current.sheets[activeSheetIndex]?.cellMeta || [];
     if (includeMeta) {
       // Use Handsontable tracked meta list instead of scanning all cells.
-      const nextMeta: Array<{ row: number; col: number; className?: string }> = [];
+      const nextMeta: Array<{
+        row: number;
+        col: number;
+        className?: string;
+        type?: string;
+        dateFormat?: string;
+        correctFormat?: boolean;
+        numericFormat?: { pattern?: string; culture?: string };
+        source?: string[];
+        strict?: boolean;
+      }> = [];
       const cellsMeta = typeof hot.getCellsMeta === "function" ? hot.getCellsMeta() : [];
       for (const meta of cellsMeta || []) {
+        const hasUsefulMeta =
+          Boolean(meta?.className) ||
+          Boolean(meta?.type) ||
+          Boolean(meta?.dateFormat) ||
+          typeof meta?.correctFormat === "boolean" ||
+          Boolean(meta?.numericFormat) ||
+          Array.isArray(meta?.source) ||
+          typeof meta?.strict === "boolean";
         if (
           typeof meta?.row === "number" &&
           typeof meta?.col === "number" &&
           meta.row >= 0 &&
           meta.col >= 0 &&
-          meta.className
+          hasUsefulMeta
         ) {
           nextMeta.push({
             row: meta.row,
             col: meta.col,
-            className: String(meta.className),
+            className: meta.className ? String(meta.className) : undefined,
+            type: meta.type ? String(meta.type) : undefined,
+            dateFormat: meta.dateFormat ? String(meta.dateFormat) : undefined,
+            correctFormat: typeof meta.correctFormat === "boolean" ? meta.correctFormat : undefined,
+            numericFormat:
+              meta.numericFormat && typeof meta.numericFormat === "object"
+                ? {
+                    pattern:
+                      typeof meta.numericFormat.pattern === "string"
+                        ? meta.numericFormat.pattern
+                        : undefined,
+                    culture:
+                      typeof meta.numericFormat.culture === "string"
+                        ? meta.numericFormat.culture
+                        : undefined,
+                  }
+                : undefined,
+            source: Array.isArray(meta.source) ? meta.source.map((v: any) => String(v)) : undefined,
+            strict: typeof meta.strict === "boolean" ? meta.strict : undefined,
           });
         }
       }
@@ -253,18 +335,35 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       const cols = Math.max(1, sheet?.grid?.[0]?.length || 1);
       return { startRow: 0, endRow: rows - 1, startCol: 0, endCol: cols - 1 };
     }
+    const rangeObj = typeof hot.getSelectedRangeLast === "function" ? hot.getSelectedRangeLast() : null;
+    if (rangeObj?.from && rangeObj?.to) {
+      const live = {
+        startRow: Math.min(rangeObj.from.row, rangeObj.to.row),
+        endRow: Math.max(rangeObj.from.row, rangeObj.to.row),
+        startCol: Math.min(rangeObj.from.col, rangeObj.to.col),
+        endCol: Math.max(rangeObj.from.col, rangeObj.to.col),
+      };
+      lastSelectionRef.current = live;
+      sheetSelectionRef.current[activeSheetIndex] = live;
+      return live;
+    }
+    const selected = hot.getSelectedLast?.();
+    if (selected) {
+      const [r1, c1, r2, c2] = selected;
+      const live = {
+        startRow: Math.min(r1, r2),
+        endRow: Math.max(r1, r2),
+        startCol: Math.min(c1, c2),
+        endCol: Math.max(c1, c2),
+      };
+      lastSelectionRef.current = live;
+      sheetSelectionRef.current[activeSheetIndex] = live;
+      return live;
+    }
     if (lastSelectionRef.current) {
       return lastSelectionRef.current;
     }
-    const selected = hot.getSelectedLast?.();
-    if (!selected) return null;
-    const [r1, c1, r2, c2] = selected;
-    return {
-      startRow: Math.min(r1, r2),
-      endRow: Math.max(r1, r2),
-      startCol: Math.min(c1, c2),
-      endCol: Math.max(c1, c2),
-    };
+    return null;
   };
 
   const ensureSelection = () => {
@@ -275,35 +374,82 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     return range;
   };
 
+  const toColumnLabel = React.useCallback((index: number) => {
+    let n = index + 1;
+    let out = "";
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      out = String.fromCharCode(65 + rem) + out;
+      n = Math.floor((n - 1) / 26);
+    }
+    return out || "A";
+  }, []);
+
+  const toRangeLabel = React.useCallback(
+    (range: { startRow: number; endRow: number; startCol: number; endCol: number } | null) => {
+      if (!range) return "A1";
+      const start = `${toColumnLabel(range.startCol)}${range.startRow + 1}`;
+      const end = `${toColumnLabel(range.endCol)}${range.endRow + 1}`;
+      return start === end ? start : `${start}:${end}`;
+    },
+    [toColumnLabel]
+  );
+
+  const refreshUndoRedoState = React.useCallback(() => {
+    const hot = hotRef.current?.hotInstance;
+    const undoRedo = hot?.getPlugin?.("undoRedo");
+    if (!undoRedo) {
+      setCanUndo(false);
+      setCanRedo(false);
+      return;
+    }
+    setCanUndo(Boolean(undoRedo?.isUndoAvailable?.()));
+    setCanRedo(Boolean(undoRedo?.isRedoAvailable?.()));
+  }, []);
+
+  const toVisibleGrid = React.useCallback(
+    (sheet?: SheetData) => {
+      const baseGrid = sheet?.grid?.length ? sheet.grid : [[""]];
+      if (!readOnly) return baseGrid;
+      const rows = Math.min(MAX_PREVIEW_ROWS, baseGrid.length);
+      const cols = Math.min(MAX_PREVIEW_COLS, baseGrid[0]?.length || 0);
+      return baseGrid.slice(0, rows).map((row) => (Array.isArray(row) ? row.slice(0, cols) : []));
+    },
+    [readOnly]
+  );
+
   const loadSheetIntoHot = React.useCallback((targetIndex: number) => {
     const hot = hotRef.current?.hotInstance;
     if (!hot) return;
     const sheet = workbookRef.current.sheets[targetIndex];
     if (!sheet) return;
-    const baseGrid = sheet.grid?.length ? sheet.grid : [[""]];
-    const rows = readOnly ? Math.min(MAX_PREVIEW_ROWS, baseGrid.length) : baseGrid.length;
-    const cols = readOnly ? Math.min(MAX_PREVIEW_COLS, baseGrid[0]?.length || 0) : (baseGrid[0]?.length || 0);
-    const visibleGrid = readOnly
-      ? baseGrid.slice(0, rows).map((row) => (Array.isArray(row) ? row.slice(0, cols) : []))
-      : baseGrid;
+    const visibleGrid = toVisibleGrid(sheet);
     setInitialGrid(visibleGrid);
     hot.loadData(visibleGrid);
     if (!readOnly) {
       for (const meta of sheet.cellMeta || []) {
         if (meta.className) hot.setCellMeta(meta.row, meta.col, "className", meta.className);
+        if (meta.type) hot.setCellMeta(meta.row, meta.col, "type", meta.type);
+        if (meta.dateFormat) hot.setCellMeta(meta.row, meta.col, "dateFormat", meta.dateFormat);
+        if (typeof meta.correctFormat === "boolean") {
+          hot.setCellMeta(meta.row, meta.col, "correctFormat", meta.correctFormat);
+        }
+        if (meta.numericFormat) hot.setCellMeta(meta.row, meta.col, "numericFormat", meta.numericFormat);
+        if (Array.isArray(meta.source)) hot.setCellMeta(meta.row, meta.col, "source", meta.source);
+        if (typeof meta.strict === "boolean") hot.setCellMeta(meta.row, meta.col, "strict", meta.strict);
       }
     }
     hot.render();
-  }, [readOnly]);
+  }, [readOnly, toVisibleGrid]);
 
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
     if (!readOnly) {
       collectCurrentSheetFromHot(true);
     }
+    setInitialGrid(toVisibleGrid(workbookRef.current.sheets[targetIndex]));
     lastSelectionRef.current = sheetSelectionRef.current[targetIndex] || null;
     setActiveSheetIndex(targetIndex);
-    setTimeout(() => loadSheetIntoHot(targetIndex), 0);
   };
 
   const emitWorkbookSnapshot = () => {
@@ -328,6 +474,10 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       setInitialGrid(first.slice(0, rows).map((row) => (Array.isArray(row) ? row.slice(0, cols) : [])));
     }
   }, [data, readOnly]);
+
+  React.useEffect(() => {
+    loadSheetIntoHot(activeSheetIndex);
+  }, [activeSheetIndex, loadSheetIntoHot]);
 
   const applyClassToSelection = (classToken: string, toggle = false, replacePrefix?: string) => {
     const hot = hotRef.current?.hotInstance;
@@ -488,6 +638,108 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     collectCurrentSheetFromHot(false);
   };
 
+  const undoAction = () => {
+    const hot = hotRef.current?.hotInstance;
+    const undoRedo = hot?.getPlugin?.("undoRedo");
+    if (!undoRedo?.undo || readOnly) return;
+    undoRedo.undo();
+    refreshUndoRedoState();
+  };
+
+  const redoAction = () => {
+    const hot = hotRef.current?.hotInstance;
+    const undoRedo = hot?.getPlugin?.("undoRedo");
+    if (!undoRedo?.redo || readOnly) return;
+    undoRedo.redo();
+    refreshUndoRedoState();
+  };
+
+  const mergeSelection = () => {
+    const hot = hotRef.current?.hotInstance;
+    const range = ensureSelection();
+    const plugin = hot?.getPlugin?.("mergeCells");
+    if (!hot || !range || !plugin || readOnly) return;
+    plugin.merge(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol
+    );
+    hot.render();
+    collectCurrentSheetFromHot(true);
+  };
+
+  const unmergeSelection = () => {
+    const hot = hotRef.current?.hotInstance;
+    const range = ensureSelection();
+    const plugin = hot?.getPlugin?.("mergeCells");
+    if (!hot || !range || !plugin || readOnly) return;
+    plugin.unmerge(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol
+    );
+    hot.render();
+    collectCurrentSheetFromHot(true);
+  };
+
+  const alterBySelection = (kind: "insert_row_above" | "insert_row_below" | "insert_col_start" | "insert_col_end" | "remove_row" | "remove_col") => {
+    const hot = hotRef.current?.hotInstance;
+    const range = ensureSelection();
+    if (!hot || !range || readOnly) return;
+    if (kind === "insert_row_above") hot.alter("insert_row_above", range.startRow, 1);
+    if (kind === "insert_row_below") hot.alter("insert_row_below", range.endRow, 1);
+    if (kind === "insert_col_start") hot.alter("insert_col_start", range.startCol, 1);
+    if (kind === "insert_col_end") hot.alter("insert_col_end", range.endCol, 1);
+    if (kind === "remove_row") hot.alter("remove_row", range.startRow, range.endRow - range.startRow + 1);
+    if (kind === "remove_col") hot.alter("remove_col", range.startCol, range.endCol - range.startCol + 1);
+    collectCurrentSheetFromHot(true);
+    refreshUndoRedoState();
+  };
+
+  const clearSelectionValues = () => {
+    const hot = hotRef.current?.hotInstance;
+    const range = ensureSelection();
+    if (!hot || !range || readOnly) return;
+    const updates: Array<[number, number, string]> = [];
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (let c = range.startCol; c <= range.endCol; c++) {
+        updates.push([r, c, ""]);
+      }
+    }
+    hot.setDataAtCell(updates);
+    collectCurrentSheetFromHot(false);
+    refreshUndoRedoState();
+  };
+
+  const clearSelectionFormatting = () => {
+    const hot = hotRef.current?.hotInstance;
+    const range = ensureSelection();
+    if (!hot || !range || readOnly) return;
+    const apply = () => {
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          const cls = String(hot.getCellMeta(r, c)?.className || "")
+            .split(" ")
+            .filter(Boolean)
+            .filter((token: string) => !token.startsWith("meta-"));
+          hot.setCellMeta(r, c, "className", cls.join(" ").trim());
+          hot.setCellMeta(r, c, "type", undefined as any);
+          hot.setCellMeta(r, c, "numericFormat", undefined as any);
+          hot.setCellMeta(r, c, "dateFormat", undefined as any);
+          hot.setCellMeta(r, c, "correctFormat", undefined as any);
+          hot.setCellMeta(r, c, "source", undefined as any);
+          hot.setCellMeta(r, c, "strict", undefined as any);
+        }
+      }
+    };
+    if (typeof hot.batch === "function") hot.batch(apply);
+    else apply();
+    hot.render();
+    collectCurrentSheetFromHot(true);
+  };
+
   const exportXlsx = async () => {
     const workbook = new ExcelJS.Workbook();
     safeSheets.forEach((sheet) => {
@@ -521,8 +773,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const nextSheets = [...safeSheets, cloned];
     workbookRef.current.sheets = nextSheets;
     setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
+    setInitialGrid(toVisibleGrid(nextSheets[nextSheets.length - 1]));
     setActiveSheetIndex(nextSheets.length - 1);
-    setTimeout(() => loadSheetIntoHot(nextSheets.length - 1), 0);
   };
 
   const moveSheet = (direction: "left" | "right") => {
@@ -534,8 +786,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     next.splice(target, 0, moved);
     workbookRef.current.sheets = next;
     setSheetTabs(next.map((s) => ({ name: s.name, tabColor: s.tabColor })));
+    setInitialGrid(toVisibleGrid(next[target]));
     setActiveSheetIndex(target);
-    setTimeout(() => loadSheetIntoHot(target), 0);
   };
 
   const applySheetColor = (color: string) => {
@@ -573,6 +825,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       `}</style>
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-1 p-2 border rounded-md bg-slate-50">
+          <span className="px-2 text-xs font-medium border rounded bg-white" title="Active selection">
+            {selectionLabel}
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={undoAction} disabled={!canUndo}>Undo</Button>
+          <Button type="button" size="sm" variant="outline" onClick={redoAction} disabled={!canRedo}>Redo</Button>
+          <span className="mx-1 h-6 border-l" />
           <Button type="button" size="sm" variant={isBoldActive ? "default" : "outline"} onClick={() => setFontStyle("bold")}>B</Button>
           <Button type="button" size="sm" variant={isItalicActive ? "default" : "outline"} onClick={() => setFontStyle("italic")}>I</Button>
           <Button type="button" size="sm" variant={isUnderlineActive ? "default" : "outline"} onClick={() => setFontStyle("underline")}>U</Button>
@@ -650,6 +908,18 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           <Button type="button" size="sm" variant="outline" onClick={() => formatSelectedAs("date")}>Date</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => sortSelectedColumn("asc")}>A→Z</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => sortSelectedColumn("desc")}>Z→A</Button>
+          <span className="mx-1 h-6 border-l" />
+          <Button type="button" size="sm" variant="outline" onClick={mergeSelection}>Merge</Button>
+          <Button type="button" size="sm" variant="outline" onClick={unmergeSelection}>Unmerge</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => alterBySelection("insert_row_above")}>+Row↑</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => alterBySelection("insert_row_below")}>+Row↓</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => alterBySelection("insert_col_start")}>+Col←</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => alterBySelection("insert_col_end")}>+Col→</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => alterBySelection("remove_row")}>Del Row</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => alterBySelection("remove_col")}>Del Col</Button>
+          <Button type="button" size="sm" variant="outline" onClick={clearSelectionValues}>Clear Values</Button>
+          <Button type="button" size="sm" variant="outline" onClick={clearSelectionFormatting}>Clear Format</Button>
+          <span className="mx-1 h-6 border-l" />
           <input value={findValue} onChange={(e) => setFindValue(e.target.value)} placeholder="Find" className="h-8 px-2 text-sm border rounded" />
           <input value={replaceValue} onChange={(e) => setReplaceValue(e.target.value)} placeholder="Replace" className="h-8 px-2 text-sm border rounded" />
           <Button type="button" size="sm" variant="outline" onClick={doFindReplace}>Replace</Button>
@@ -758,8 +1028,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
               ];
               workbookRef.current.sheets = nextSheets;
               setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
+              setInitialGrid(toVisibleGrid(nextSheets[nextSheets.length - 1]));
               setActiveSheetIndex(nextSheets.length - 1);
-              setTimeout(() => loadSheetIntoHot(nextSheets.length - 1), 0);
             }}
           >
             + Add Sheet
@@ -878,6 +1148,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                   cp.readOnly = false;
                 }
                 if (className) cp.className = className;
+                if (persistedMeta?.type) cp.type = persistedMeta.type;
+                if (persistedMeta?.dateFormat) cp.dateFormat = persistedMeta.dateFormat;
+                if (typeof persistedMeta?.correctFormat === "boolean") cp.correctFormat = persistedMeta.correctFormat;
+                if (persistedMeta?.numericFormat) cp.numericFormat = persistedMeta.numericFormat;
+                if (Array.isArray(persistedMeta?.source)) cp.source = persistedMeta.source;
+                if (typeof persistedMeta?.strict === "boolean") cp.strict = persistedMeta.strict;
                 const image = imageMap.get(`${row}:${col}`);
                 if (image || !readOnly) {
                   cp.renderer = (
@@ -902,6 +1178,20 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                     const sizeToken = tokens.find((t: string) => t.startsWith("meta-size-"));
                     const colorToken = tokens.find((t: string) => t.startsWith("meta-color-"));
                     const fillToken = tokens.find((t: string) => t.startsWith("meta-fill-"));
+                    const alignToken = tokens.find((t: string) => t.startsWith("meta-align-"));
+                    const vAlignToken = tokens.find((t: string) => t.startsWith("meta-valign-"));
+                    const hasWrap = tokens.includes("meta-wrap");
+                    // Reset styles for recycled table cells before applying tokenized formatting.
+                    td.style.fontWeight = "";
+                    td.style.fontStyle = "";
+                    td.style.textDecoration = "";
+                    td.style.fontFamily = "";
+                    td.style.fontSize = "";
+                    td.style.color = "";
+                    td.style.backgroundColor = "";
+                    td.style.textAlign = "";
+                    td.style.verticalAlign = "";
+                    td.style.whiteSpace = "";
                     if (isBold) td.style.fontWeight = "700";
                     if (isItalic) td.style.fontStyle = "italic";
                     if (isUnderline || isStrike) {
@@ -915,6 +1205,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                     if (sizeToken) td.style.fontSize = `${sizeToken.replace("meta-size-", "")}px`;
                     if (colorToken) td.style.color = `#${colorToken.replace("meta-color-", "")}`;
                     if (fillToken) td.style.backgroundColor = `#${fillToken.replace("meta-fill-", "")}`;
+                    if (alignToken) td.style.textAlign = alignToken.replace("meta-align-", "");
+                    if (vAlignToken) {
+                      const nextV = vAlignToken.replace("meta-valign-", "");
+                      td.style.verticalAlign = nextV === "middle" ? "middle" : nextV;
+                    }
+                    if (hasWrap) td.style.whiteSpace = "normal";
                     if (image?.dataUrl) {
                       const colWidths = Array.isArray(renderedColWidths) ? renderedColWidths : [];
                       const rowHeights = Array.isArray(renderedRowHeights) ? renderedRowHeights : [];
@@ -953,8 +1249,24 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         afterChange={() => {
           // Keep Handsontable fully in charge during editing.
           // We only sync to ref on explicit save or sheet switch.
+          refreshUndoRedoState();
         }}
-        afterSelectionEnd={(r, c) => {
+        afterSelection={(r, c, r2, c2) => {
+          const hasValidCell = Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0;
+          if (!hasValidCell) return;
+          const endRow = Number.isInteger(r2) ? r2 : r;
+          const endCol = Number.isInteger(c2) ? c2 : c;
+          const nextRange = {
+            startRow: Math.min(r, endRow),
+            endRow: Math.max(r, endRow),
+            startCol: Math.min(c, endCol),
+            endCol: Math.max(c, endCol),
+          };
+          lastSelectionRef.current = nextRange;
+          sheetSelectionRef.current[activeSheetIndex] = nextRange;
+          setSelectionLabel(toRangeLabel(nextRange));
+        }}
+        afterSelectionEnd={(r, c, r2, c2) => {
           const hot = hotRef.current?.hotInstance;
           if (!hot) return;
           const hasValidCell = Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0;
@@ -963,20 +1275,16 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             // after focus moves from the grid to toolbar controls.
             return;
           }
-          const selected = hot.getSelectedLast?.();
-          if (selected) {
-            const [r1, c1, r2, c2] = selected;
-            lastSelectionRef.current = {
-              startRow: Math.min(r1, r2),
-              endRow: Math.max(r1, r2),
-              startCol: Math.min(c1, c2),
-              endCol: Math.max(c1, c2),
-            };
-            sheetSelectionRef.current[activeSheetIndex] = lastSelectionRef.current;
-          } else {
-            lastSelectionRef.current = { startRow: r, endRow: r, startCol: c, endCol: c };
-            sheetSelectionRef.current[activeSheetIndex] = lastSelectionRef.current;
-          }
+          const endRow = Number.isInteger(r2) ? r2 : r;
+          const endCol = Number.isInteger(c2) ? c2 : c;
+          lastSelectionRef.current = {
+            startRow: Math.min(r, endRow),
+            endRow: Math.max(r, endRow),
+            startCol: Math.min(c, endCol),
+            endCol: Math.max(c, endCol),
+          };
+          sheetSelectionRef.current[activeSheetIndex] = lastSelectionRef.current;
+          setSelectionLabel(toRangeLabel(lastSelectionRef.current));
           const v = hot.getDataAtCell(r, c);
           setFormulaInput(v == null ? "" : String(v));
           const cls = String(hot.getCellMeta(r, c)?.className || "");
@@ -1017,15 +1325,17 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         afterMergeCells={() => {
           if (readOnly) return;
           collectCurrentSheetFromHot(true);
+          refreshUndoRedoState();
         }}
         afterUnmergeCells={() => {
           if (readOnly) return;
           collectCurrentSheetFromHot(true);
+          refreshUndoRedoState();
         }}
-        afterCreateRow={() => {}}
-        afterCreateCol={() => {}}
-        afterRemoveRow={() => {}}
-        afterRemoveCol={() => {}}
+        afterCreateRow={() => refreshUndoRedoState()}
+        afterCreateCol={() => refreshUndoRedoState()}
+        afterRemoveRow={() => refreshUndoRedoState()}
+        afterRemoveCol={() => refreshUndoRedoState()}
       />
     </div>
     {isPreviewTruncated && (
