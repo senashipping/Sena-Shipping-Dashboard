@@ -745,11 +745,13 @@ const FormBuilder: React.FC = () => {
                       <DialogTitle>Form Preview - {formState.title}</DialogTitle>
                     </DialogHeader>
                     <div className="mt-4">
-                      <PreviewForm
-                        formState={formState}
-                        onSubmit={() => handleSubmit()}
-                        isSubmitting={createMutation.isPending || updateMutation.isPending}
-                      />
+                      {isPreviewOpen ? (
+                        <PreviewForm
+                          formState={formState}
+                          onSubmit={() => handleSubmit()}
+                          isSubmitting={createMutation.isPending || updateMutation.isPending}
+                        />
+                      ) : null}
                     </div>
                   </DialogContent>
                 </Dialog>

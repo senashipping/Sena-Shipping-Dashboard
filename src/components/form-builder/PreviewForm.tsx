@@ -16,7 +16,11 @@ interface PreviewFormProps {
   isSubmitting?: boolean;
 }
 
-const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting = false }) => {
+const PreviewForm: FC<PreviewFormProps> = ({
+  formState,
+  onSubmit,
+  isSubmitting = false,
+}) => {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
 
@@ -27,7 +31,11 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting =
     }));
   };
 
-  const handleTableChange = (rowIndex: number, columnName: string, value: any) => {
+  const handleTableChange = (
+    rowIndex: number,
+    columnName: string,
+    value: any,
+  ) => {
     setTableData((prev) => {
       const newData = [...prev];
       if (!newData[rowIndex]) newData[rowIndex] = {};
@@ -36,7 +44,12 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting =
     });
   };
 
-  const handleMixedTableChange = (sectionId: string, rowIndex: number, columnName: string, value: any) => {
+  const handleMixedTableChange = (
+    sectionId: string,
+    rowIndex: number,
+    columnName: string,
+    value: any,
+  ) => {
     const tableKey = `table_${sectionId}`;
     setFormData((prev) => {
       const tableDataInner = prev[tableKey] || [];
@@ -69,7 +82,9 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting =
       const tableKey = `table_${tableId}`;
       setFormData((prev) => ({
         ...prev,
-        [tableKey]: (prev[tableKey] || []).filter((_: any, i: number) => i !== rowIndex),
+        [tableKey]: (prev[tableKey] || []).filter(
+          (_: any, i: number) => i !== rowIndex,
+        ),
       }));
     } else {
       setTableData((prev) => prev.filter((_, i) => i !== rowIndex));
@@ -77,7 +92,12 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting =
   };
 
   const submitButton = (
-    <Button type="button" className="w-full" onClick={onSubmit} disabled={!onSubmit || isSubmitting}>
+    <Button
+      type="button"
+      className="w-full"
+      onClick={onSubmit}
+      disabled={!onSubmit || isSubmitting}
+    >
       {isSubmitting ? "Submitting..." : "Submit Form"}
     </Button>
   );

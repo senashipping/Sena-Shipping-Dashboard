@@ -10,7 +10,130 @@ import { Button } from "../ui/button";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { FormField, FormSection, TableConfig } from "../../types";
 import { Alert, AlertDescription } from "../ui/alert";
-import HandsontableWorkbook from "./HandsontableWorkbook";
+import HandsontableWorkbook, {
+  MAX_PREVIEW_COLS,
+  MAX_PREVIEW_ROWS,
+} from "./HandsontableWorkbook";
+
+/** Shrink template workbooks before read-only preview so Handsontable/normalize never walks huge grids. */
+function truncateWorkbookForReadOnlyPreview(
+  workbook: { sheets: any[] },
+  maxRows: number,
+  maxCols: number,
+): { sheets: any[] } {
+  if (!workbook?.sheets?.length) return workbook;
+  return {
+    sheets: workbook.sheets.map((sheet: any) => {
+      const grid = Array.isArray(sheet.grid) ? sheet.grid : [];
+      const rows = Math.min(maxRows, grid.length);
+      const cols = Math.min(maxCols, grid[0]?.length ?? 0);
+      const slicedGrid = grid
+        .slice(0, rows)
+        .map((row: any[]) => (Array.isArray(row) ? row.slice(0, cols) : []));
+      const mergeCells = (sheet.mergeCells || []).filter(
+        (m: any) =>
+          m &&
+          Number.isFinite(+m.row) &&
+          Number.isFinite(+m.col) &&
+          m.row < rows &&
+          m.col < cols &&
+          m.row + m.rowspan <= rows &&
+          m.col + m.colspan <= cols,
+      );
+      const cellMeta = (sheet.cellMeta || []).filter(
+        (m: any) =>
+          m &&
+          Number.isFinite(+m.row) &&
+          Number.isFinite(+m.col) &&
+          m.row < rows &&
+          m.col < cols,
+      );
+      const images = (sheet.images || []).filter(
+        (img: any) =>
+          img &&
+          Number.isFinite(+img.row) &&
+          Number.isFinite(+img.col) &&
+          img.row < rows &&
+          img.col < cols,
+      );
+      return {
+        ...sheet,
+        grid: slicedGrid,
+        mergeCells,
+        cellMeta,
+        images,
+        colWidthsPx: Array.isArray(sheet.colWidthsPx)
+          ? sheet.colWidthsPx.slice(0, cols)
+          : undefined,
+        rowHeightsPx: Array.isArray(sheet.rowHeightsPx)
+          ? sheet.rowHeightsPx.slice(0, rows)
+          : undefined,
+      };
+    }),
+  };
+}
+
+/** Memoized so opening preview does not rebuild a truncated workbook object on every parent render. */
+const EmbeddedExcelHandsontableBlock: React.FC<{
+  fieldName: string;
+  workbook: { sheets: any[] };
+  excelReadOnly: boolean;
+  useLocalExcelState: boolean;
+  setLocalExcelState: React.Dispatch<
+    React.SetStateAction<Record<string, any>>
+  >;
+  onFieldChange: (fieldName: string, value: any) => void;
+}> = React.memo(function EmbeddedExcelHandsontableBlock({
+  fieldName,
+  workbook,
+  excelReadOnly,
+  useLocalExcelState,
+  setLocalExcelState,
+  onFieldChange,
+}) {
+  const data = React.useMemo(() => {
+    if (useLocalExcelState && excelReadOnly) {
+      return truncateWorkbookForReadOnlyPreview(
+        workbook,
+        MAX_PREVIEW_ROWS,
+        MAX_PREVIEW_COLS,
+      );
+    }
+    return workbook;
+  }, [workbook, useLocalExcelState, excelReadOnly]);
+
+  const templateExceedsPreview = React.useMemo(() => {
+    if (!useLocalExcelState || !excelReadOnly) return false;
+    return workbook.sheets.some((s: any) => {
+      const g = s?.grid;
+      if (!Array.isArray(g) || g.length === 0) return false;
+      const cols0 = Array.isArray(g[0]) ? g[0].length : 0;
+      return g.length > MAX_PREVIEW_ROWS || cols0 > MAX_PREVIEW_COLS;
+    });
+  }, [workbook, useLocalExcelState, excelReadOnly]);
+
+  return (
+    <div className="space-y-2">
+      <HandsontableWorkbook
+        data={data}
+        readOnly={excelReadOnly}
+        onChange={(next) => {
+          if (useLocalExcelState) {
+            setLocalExcelState((prev) => ({ ...prev, [fieldName]: next }));
+            return;
+          }
+          onFieldChange(fieldName, next);
+        }}
+      />
+      {templateExceedsPreview && (
+        <p className="text-xs text-amber-800 border border-amber-200 rounded bg-amber-50 px-2 py-1">
+          Form preview loads only the first {MAX_PREVIEW_ROWS} rows × {MAX_PREVIEW_COLS}{" "}
+          columns of this workbook so the page stays responsive.
+        </p>
+      )}
+    </div>
+  );
+});
 
 interface SharedFormRendererProps {
   formState: {
@@ -265,9 +388,16 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
           const activeSheet = workbook.sheets[sheetIndex];
           const grid = Array.isArray(activeSheet?.grid) ? activeSheet.grid : [];
           const rows = grid.slice(0, 60);
-          const maxCols = Math.min(24, Math.max(0, ...rows.map((r: any[]) => (Array.isArray(r) ? r.length : 0))));
+          let widest = 0;
+          for (const r of rows) {
+            if (Array.isArray(r) && r.length > widest) widest = r.length;
+          }
+          const maxCols = Math.min(24, widest);
           return (
             <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Snapshot preview (first 60 rows × 24 columns). Fillable spreadsheet cells work on the live submission page.
+              </p>
               <div className="flex flex-wrap gap-2">
                 {workbook.sheets.map((sheet: any, idx: number) => (
                   <Button
@@ -307,16 +437,13 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
           );
         }
         return (
-          <HandsontableWorkbook
-            data={workbook}
-            readOnly={excelReadOnly}
-            onChange={(next) => {
-              if (useLocalExcelState) {
-                setLocalExcelState((prev) => ({ ...prev, [field.name]: next }));
-                return;
-              }
-              onFieldChange(field.name, next);
-            }}
+          <EmbeddedExcelHandsontableBlock
+            fieldName={field.name}
+            workbook={workbook}
+            excelReadOnly={excelReadOnly}
+            useLocalExcelState={useLocalExcelState}
+            setLocalExcelState={setLocalExcelState}
+            onFieldChange={onFieldChange}
           />
         );
       }
