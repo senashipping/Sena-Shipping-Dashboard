@@ -729,37 +729,27 @@ const FormBuilder: React.FC = () => {
                   <Redo className="w-4 h-4" />
                 </Button>
                 <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="hidden sm:flex"
-                    onClick={() => setIsPreviewOpen(true)}
-                  >
-                    <Eye className="w-4 h-4 mr-2" />
-                    Preview
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="p-2 sm:hidden"
-                    onClick={() => setIsPreviewOpen(true)}
-                  >
-                    <Eye className="w-4 h-4" />
-                  </Button>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="hidden sm:flex">
+                      <Eye className="w-4 h-4 mr-2" />
+                      Preview
+                    </Button>
+                  </DialogTrigger>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="p-2 sm:hidden">
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                  </DialogTrigger>
                   <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto mx-4">
                     <DialogHeader>
                       <DialogTitle>Form Preview - {formState.title}</DialogTitle>
                     </DialogHeader>
                     <div className="mt-4">
-                      {isPreviewOpen ? (
-                        <PreviewForm
-                          formState={formState}
-                          onSubmit={() => handleSubmit()}
-                          isSubmitting={createMutation.isPending || updateMutation.isPending}
-                        />
-                      ) : null}
+                      <PreviewForm
+                        formState={formState}
+                        onSubmit={() => handleSubmit()}
+                        isSubmitting={createMutation.isPending || updateMutation.isPending}
+                      />
                     </div>
                   </DialogContent>
                 </Dialog>
