@@ -144,8 +144,21 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         const ws = workbook.Sheets[name];
         const ref = ws?.["!ref"] || "A1";
         const range = XLSX.utils.decode_range(ref);
-        const rows = Math.min(MAX_IMPORT_ROWS, Math.max(1, range.e.r - range.s.r + 1));
-        const cols = Math.min(MAX_IMPORT_COLS, Math.max(1, range.e.c - range.s.c + 1));
+        // Excel often keeps `!ref` tight to used values while `!merges` extends past it.
+        // Importing only the ref box leaves merges mis-sized vs the grid (in-app workbooks
+        // never hit this). Grow the imported rectangle to cover all merges (then cap).
+        let maxR = range.e.r;
+        let maxC = range.e.c;
+        if (Array.isArray(ws?.["!merges"])) {
+          for (const m of ws["!merges"] as { s?: { r: number; c: number }; e?: { r: number; c: number } }[]) {
+            if (m?.s && m?.e) {
+              maxR = Math.max(maxR, m.s.r, m.e.r);
+              maxC = Math.max(maxC, m.s.c, m.e.c);
+            }
+          }
+        }
+        const rows = Math.min(MAX_IMPORT_ROWS, Math.max(1, maxR - range.s.r + 1));
+        const cols = Math.min(MAX_IMPORT_COLS, Math.max(1, maxC - range.s.c + 1));
 
         const grid = Array.from({ length: rows }, (_, r) =>
           Array.from({ length: cols }, (_, c) => {

@@ -80,87 +80,152 @@ const cloneEditableGrid = (rawGrid: unknown): string[][] => {
   return g.map((row) => (Array.isArray(row) ? [...row] : [""]));
 };
 
+/**
+ * Outside Excel imports, merged regions can extend past the stored grid (or past `!ref`).
+ * Handsontable misbehaves when `mergeCells` hangs off the data array — clip to the grid.
+ */
+const clipMergeCellsToGrid = (
+  merges: NonNullable<SheetData["mergeCells"]>,
+  gridRows: number,
+  gridCols: number,
+): NonNullable<SheetData["mergeCells"]> => {
+  if (!merges.length || gridRows < 1 || gridCols < 1) return [];
+  const maxR = gridRows - 1;
+  const maxC = gridCols - 1;
+  const out: NonNullable<SheetData["mergeCells"]> = [];
+  for (const m of merges) {
+    if (!m) continue;
+    const r0 = +m.row;
+    const c0 = +m.col;
+    const rs = +m.rowspan;
+    const cs = +m.colspan;
+    if (
+      ![r0, c0, rs, cs].every((n) => Number.isFinite(n)) ||
+      rs < 1 ||
+      cs < 1
+    )
+      continue;
+    const r1 = r0 + rs - 1;
+    const c1 = c0 + cs - 1;
+    const cr0 = Math.max(0, Math.min(maxR, r0));
+    const cc0 = Math.max(0, Math.min(maxC, c0));
+    const cr1 = Math.max(0, Math.min(maxR, r1));
+    const cc1 = Math.max(0, Math.min(maxC, c1));
+    if (cr1 < cr0 || cc1 < cc0) continue;
+    const rowspan = cr1 - cr0 + 1;
+    const colspan = cc1 - cc0 + 1;
+    if (rowspan > 0 && colspan > 0)
+      out.push({ row: cr0, col: cc0, rowspan, colspan });
+  }
+  return out;
+};
+
 const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
   if (!Array.isArray(input?.sheets) || input.sheets.length === 0)
     return [{ name: "Sheet1", grid: [[""]] }];
-  return input.sheets.map((sheet, i) => ({
-    name: sheet?.name || `Sheet${i + 1}`,
-    grid: toSafeGrid(sheet?.grid),
-    mergeCells: Array.isArray(sheet?.mergeCells)
-      ? sheet.mergeCells
-          .filter(
-            (m: any) =>
-              m &&
-              Number.isFinite(+m.row) &&
-              Number.isFinite(+m.col) &&
-              Number.isFinite(+m.rowspan) &&
-              Number.isFinite(+m.colspan) &&
-              +m.rowspan > 0 &&
-              +m.colspan > 0,
-          )
-          .map((m: any) => ({
-            row: +m.row,
-            col: +m.col,
-            rowspan: +m.rowspan,
-            colspan: +m.colspan,
-          }))
-      : [],
-    cellMeta: dedupeCellMetaByCoordinate(
-      Array.isArray(sheet?.cellMeta)
-        ? sheet.cellMeta
+  return input.sheets.map((sheet, i) => {
+    const grid = toSafeGrid(sheet?.grid);
+    const gridRows = grid.length;
+    const gridCols = Math.max(
+      1,
+      grid.reduce(
+        (w, row) => Math.max(w, Array.isArray(row) ? row.length : 0),
+        0,
+      ),
+    );
+
+    const mergeCells = clipMergeCellsToGrid(
+      Array.isArray(sheet?.mergeCells)
+        ? sheet.mergeCells
             .filter(
-              (m: any) => m && Number.isFinite(+m.row) && Number.isFinite(+m.col),
+              (m: any) =>
+                m &&
+                Number.isFinite(+m.row) &&
+                Number.isFinite(+m.col) &&
+                Number.isFinite(+m.rowspan) &&
+                Number.isFinite(+m.colspan) &&
+                +m.rowspan > 0 &&
+                +m.colspan > 0,
             )
             .map((m: any) => ({
               row: +m.row,
               col: +m.col,
-              className:
-                typeof m.className === "string" ? m.className : undefined,
-              type: typeof m.type === "string" ? m.type : undefined,
-              dateFormat:
-                typeof m.dateFormat === "string" ? m.dateFormat : undefined,
-              correctFormat:
-                typeof m.correctFormat === "boolean"
-                  ? m.correctFormat
-                  : undefined,
-              numericFormat:
-                m.numericFormat && typeof m.numericFormat === "object"
-                  ? {
-                      pattern:
-                        typeof m.numericFormat.pattern === "string"
-                          ? m.numericFormat.pattern
-                          : undefined,
-                      culture:
-                        typeof m.numericFormat.culture === "string"
-                          ? m.numericFormat.culture
-                          : undefined,
-                    }
-                  : undefined,
-              source: Array.isArray(m.source) ? m.source.map(String) : undefined,
-              strict: typeof m.strict === "boolean" ? m.strict : undefined,
+              rowspan: +m.rowspan,
+              colspan: +m.colspan,
             }))
         : [],
-    ),
-    images: dedupeImagesByAnchor(
-      Array.isArray((sheet as any)?.images)
-        ? (sheet as any).images.filter(
-            (img: any) =>
-              img &&
-              Number.isFinite(+img.row) &&
-              Number.isFinite(+img.col) &&
-              typeof img.dataUrl === "string" &&
-              img.dataUrl.length > 0,
-          )
-        : [],
-    ),
-    colWidthsPx: Array.isArray(sheet?.colWidthsPx)
-      ? [...sheet.colWidthsPx]
-      : undefined,
-    rowHeightsPx: Array.isArray(sheet?.rowHeightsPx)
-      ? [...sheet.rowHeightsPx]
-      : undefined,
-    tabColor: sheet?.tabColor,
-  }));
+      gridRows,
+      gridCols,
+    );
+
+    return {
+      name: sheet?.name || `Sheet${i + 1}`,
+      grid,
+      mergeCells,
+      cellMeta: dedupeCellMetaByCoordinate(
+        Array.isArray(sheet?.cellMeta)
+          ? sheet.cellMeta
+              .filter(
+                (m: any) =>
+                  m &&
+                  Number.isFinite(+m.row) &&
+                  Number.isFinite(+m.col) &&
+                  +m.row >= 0 &&
+                  +m.col >= 0 &&
+                  +m.row < gridRows &&
+                  +m.col < gridCols,
+              )
+              .map((m: any) => ({
+                row: +m.row,
+                col: +m.col,
+                className:
+                  typeof m.className === "string" ? m.className : undefined,
+                type: typeof m.type === "string" ? m.type : undefined,
+                dateFormat:
+                  typeof m.dateFormat === "string" ? m.dateFormat : undefined,
+                correctFormat:
+                  typeof m.correctFormat === "boolean"
+                    ? m.correctFormat
+                    : undefined,
+                numericFormat:
+                  m.numericFormat && typeof m.numericFormat === "object"
+                    ? {
+                        pattern:
+                          typeof m.numericFormat.pattern === "string"
+                            ? m.numericFormat.pattern
+                            : undefined,
+                        culture:
+                          typeof m.numericFormat.culture === "string"
+                            ? m.numericFormat.culture
+                            : undefined,
+                      }
+                    : undefined,
+                source: Array.isArray(m.source) ? m.source.map(String) : undefined,
+                strict: typeof m.strict === "boolean" ? m.strict : undefined,
+              }))
+          : [],
+      ),
+      images: dedupeImagesByAnchor(
+        Array.isArray((sheet as any)?.images)
+          ? (sheet as any).images.filter(
+              (img: any) =>
+                img &&
+                Number.isFinite(+img.row) &&
+                Number.isFinite(+img.col) &&
+                typeof img.dataUrl === "string" &&
+                img.dataUrl.length > 0,
+            )
+          : [],
+      ),
+      colWidthsPx: Array.isArray(sheet?.colWidthsPx)
+        ? [...sheet.colWidthsPx]
+        : undefined,
+      rowHeightsPx: Array.isArray(sheet?.rowHeightsPx)
+        ? [...sheet.rowHeightsPx]
+        : undefined,
+      tabColor: sheet?.tabColor,
+    };
+  });
 };
 
 /** Include row/col pixel sizes so incoming `data` syncs when only dimensions change. */
@@ -182,6 +247,25 @@ const workbookSignature = (sheets: SheetData[]) =>
         `${s.grid?.length || 0}x${s.grid?.[0]?.length || 0}`,
         `m${s.mergeCells?.length || 0}`,
         `c${s.cellMeta?.length || 0}`,
+        s.tabColor || "",
+        `cw${dimListSignature(s.colWidthsPx)}`,
+        `rh${dimListSignature(s.rowHeightsPx)}`,
+      ].join("|"),
+    )
+    .join("::");
+
+/**
+ * Shape-only signature for the HotTable React `key`. Must NOT include `cellMeta` length:
+ * marking fillable cells changes meta count and was remounting HOT on every click (scroll
+ * jump to top, lazy meta loss, glitchy renders).
+ */
+const hotTableMountSignature = (sheets: SheetData[]) =>
+  sheets
+    .map((s) =>
+      [
+        s.name,
+        `${s.grid?.length || 0}x${s.grid?.[0]?.length || 0}`,
+        `m${s.mergeCells?.length || 0}`,
         s.tabColor || "",
         `cw${dimListSignature(s.colWidthsPx)}`,
         `rh${dimListSignature(s.rowHeightsPx)}`,
@@ -238,6 +322,51 @@ type CellMetaEntry = NonNullable<SheetData["cellMeta"]>[number];
 
 /** Stable 0-based cell index used everywhere we key cells (one logical cell = one bucket). */
 const cellCoordKey = (row: number, col: number) => `${row}:${col}`;
+
+const classNameHasFillable = (className?: string) =>
+  String(className || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .includes("meta-fillable");
+
+/**
+ * Runtime preview: treat a cell as fillable if persisted `cellMeta` marks that coordinate, or
+ * the cell lies inside a merged region where any covered coordinate is marked fillable.
+ * (Mark Fillable often tags the whole range; HOT merge + `afterGetCellMeta` must still agree.)
+ */
+const isPreviewFillableAt = (
+  row: number,
+  col: number,
+  metaMap: Map<string, CellMetaEntry>,
+  merges: SheetData["mergeCells"],
+): boolean => {
+  if (classNameHasFillable(metaMap.get(cellCoordKey(row, col))?.className))
+    return true;
+  if (!merges?.length) return false;
+  for (const m of merges) {
+    if (
+      !m ||
+      !Number.isFinite(+m.row) ||
+      !Number.isFinite(+m.col) ||
+      !Number.isFinite(+m.rowspan) ||
+      !Number.isFinite(+m.colspan)
+    )
+      continue;
+    const r0 = +m.row;
+    const c0 = +m.col;
+    const r1 = r0 + +m.rowspan - 1;
+    const c1 = c0 + +m.colspan - 1;
+    if (row < r0 || row > r1 || col < c0 || col > c1) continue;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (classNameHasFillable(metaMap.get(cellCoordKey(r, c))?.className))
+          return true;
+      }
+    }
+    return false;
+  }
+  return false;
+};
 
 const mergeClassNameStrings = (a?: string, b?: string) => {
   const tokens = new Set<string>();
@@ -389,6 +518,7 @@ const HandsontableWorkbook = React.forwardRef<
   const lastIncomingSignatureRef = React.useRef(
     workbookSignature(normalizeSheets(data).map(deepCloneSheet)),
   );
+  const readOnlyEmitTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
 
   const [activeSheetIndex, setActiveSheetIndex] = React.useState(0);
   const activeSheetIndexRef = React.useRef(0);
@@ -466,7 +596,6 @@ const HandsontableWorkbook = React.forwardRef<
   const fillColorApplyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const readOnlyEmitTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
 
   const safeSheets = workbookRef.current.sheets;
   const activeSheet =
@@ -742,7 +871,15 @@ const HandsontableWorkbook = React.forwardRef<
       let cellMeta =
         workbookRef.current.sheets[idx]?.cellMeta || [];
       if (includeMeta) {
-        const nextMeta: NonNullable<SheetData["cellMeta"]> = [];
+        // HOT's getCellsMeta() only returns *lazy-initialized* meta objects. Replacing the
+        // full persisted `cellMeta` with that list drops formatting for cells the table has
+        // never touched (e.g. other fillable highlights after marking a new region).
+        const metaByKey = new Map<string, CellMetaEntry>();
+        for (const m of cellMeta) {
+          if (!m || !Number.isFinite(+m.row) || !Number.isFinite(+m.col)) continue;
+          metaByKey.set(cellCoordKey(+m.row, +m.col), { ...m, row: +m.row, col: +m.col });
+        }
+
         const cellsMeta =
           typeof hot.getCellsMeta === "function" ? hot.getCellsMeta() : [];
         for (const meta of cellsMeta || []) {
@@ -761,7 +898,7 @@ const HandsontableWorkbook = React.forwardRef<
             meta.col >= 0 &&
             useful
           ) {
-            nextMeta.push({
+            metaByKey.set(cellCoordKey(meta.row, meta.col), {
               row: meta.row,
               col: meta.col,
               className: meta.className ? String(meta.className) : undefined,
@@ -792,7 +929,7 @@ const HandsontableWorkbook = React.forwardRef<
             });
           }
         }
-        cellMeta = dedupeCellMetaByCoordinate(nextMeta);
+        cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       }
 
       const current = workbookRef.current.sheets[idx] || {
@@ -875,9 +1012,9 @@ const HandsontableWorkbook = React.forwardRef<
   );
 
   const emitWorkbookToParent = React.useCallback(() => {
-    onChange({
-      sheets: workbookRef.current.sheets.map(deepCloneSheet),
-    });
+    const snapshot = { sheets: workbookRef.current.sheets.map(deepCloneSheet) };
+    lastIncomingSignatureRef.current = workbookSignature(snapshot.sheets);
+    onChange(snapshot);
   }, [onChange]);
 
   const toVisibleGrid = React.useCallback(
@@ -1190,8 +1327,6 @@ const HandsontableWorkbook = React.forwardRef<
     collectCurrentSheetFromHot(true);
     const range = getToolbarActionRange(hot);
     if (!range) return;
-
-    applyClassToSelection("meta-fillable", false);
 
     const idx = activeSheetIndexRef.current;
     const sheet = workbookRef.current.sheets[idx];
@@ -1520,6 +1655,15 @@ const HandsontableWorkbook = React.forwardRef<
     const nextSheets = normalizeSheets(data);
     const sig = workbookSignature(nextSheets);
     if (sig === lastIncomingSignatureRef.current) return;
+
+    const hot = hotRef.current?.hotInstance;
+    if (
+      hot &&
+      typeof hot.isEditorOpened === "function" &&
+      hot.isEditorOpened()
+    )
+      return;
+
     lastIncomingSignatureRef.current = sig;
 
     const prevSheetCount = workbookRef.current.sheets.length;
@@ -1562,6 +1706,11 @@ const HandsontableWorkbook = React.forwardRef<
     [data],
   );
 
+  const hotTableMountKey = React.useMemo(
+    () => hotTableMountSignature(normalizeSheets(data)),
+    [data],
+  );
+
   React.useEffect(() => {
     loadSheetIntoHot(activeSheetIndex);
   }, [activeSheetIndex, loadSheetIntoHot, incomingWorkbookKey]);
@@ -1574,7 +1723,14 @@ const HandsontableWorkbook = React.forwardRef<
       const cp: any = {};
       const persistedClassName = String(persistedMeta?.className || "");
       const classTokens = persistedClassName.split(" ").filter(Boolean);
-      const isFillable = classTokens.includes("meta-fillable");
+      const isFillable = readOnly
+        ? isPreviewFillableAt(
+            row,
+            col,
+            persistedCellMetaMap,
+            renderedMergeCells,
+          )
+        : classTokens.includes("meta-fillable");
       cp.readOnly = readOnly ? !isFillable : false;
       if (persistedMeta?.className) cp.className = persistedMeta.className;
       if (persistedMeta?.type) cp.type = persistedMeta.type;
@@ -1695,6 +1851,7 @@ const HandsontableWorkbook = React.forwardRef<
       persistedCellMetaMap,
       imageMap,
       readOnly,
+      renderedMergeCells,
       renderedColWidths,
       renderedRowHeights,
     ],
@@ -1705,19 +1862,23 @@ const HandsontableWorkbook = React.forwardRef<
    * (`readOnly={false}`) always stays fully editable (e.g. formula engine meta).
    */
   const afterGetCellMeta = React.useCallback(
-    (_row: number, _col: number, cellProps: Record<string, unknown>) => {
+    (row: number, col: number, cellProps: Record<string, unknown>) => {
       if (!readOnly) {
         (cellProps as { readOnly?: boolean }).readOnly = false;
         return;
       }
-      const cls = String((cellProps as { className?: string }).className || "");
-      const isFillable = cls
-        .split(" ")
-        .filter(Boolean)
-        .includes("meta-fillable");
+      // Do not trust `cellProps.className` alone: in preview we skip `setCellMeta` in
+      // `loadSheetIntoHot`, so HOT often has no `meta-fillable` on the meta layer even when
+      // persisted `cellMeta` does — that left `readOnly` stuck true and blocked all typing.
+      const isFillable = isPreviewFillableAt(
+        row,
+        col,
+        persistedCellMetaMap,
+        renderedMergeCells,
+      );
       (cellProps as { readOnly?: boolean }).readOnly = !isFillable;
     },
-    [readOnly],
+    [readOnly, persistedCellMetaMap, renderedMergeCells],
   );
 
   // ─── Toolbar button wrapper — prevents focus loss ─────────────────────────
@@ -2289,7 +2450,7 @@ const HandsontableWorkbook = React.forwardRef<
           /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
            * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
            * leak onto another at the same coordinates. */
-          key={`ht-wb-${activeSheetIndex}-${incomingWorkbookKey}`}
+          key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
           ref={hotRef}
           data={initialGrid}
           themeName="ht-theme-main"
@@ -2365,7 +2526,13 @@ const HandsontableWorkbook = React.forwardRef<
           afterColumnResize={() => flushLayoutToParent()}
           afterRowResize={() => flushLayoutToParent()}
           afterChange={(changes, source) => {
-            if (Array.isArray(changes) && changes.length > 0) {
+            // Preview (`readOnly`): never call undo/redo setState here — it runs on every
+            // keystroke and re-renders the HotTable wrapper, which closes the editor and drops input.
+            if (
+              !readOnly &&
+              Array.isArray(changes) &&
+              changes.length > 0
+            ) {
               refreshUndoRedoState();
             }
             if (
@@ -2408,7 +2575,7 @@ const HandsontableWorkbook = React.forwardRef<
                 clearTimeout(readOnlyEmitTimerRef.current);
                 readOnlyEmitTimerRef.current = setTimeout(() => {
                   emitWorkbookToParent();
-                }, 300);
+                }, 20000);
               }
             }
           }}
@@ -2425,7 +2592,10 @@ const HandsontableWorkbook = React.forwardRef<
             };
             lastSelectionRef.current = range;
             sheetSelectionRef.current[activeSheetIndexRef.current] = range;
-            setSelectionLabel(toRangeLabel(range));
+            // Preview: never setState here — Handsontable can fire `afterSelection` while the
+            // cell editor is open; re-rendering the React wrapper tears down the editor and
+            // focus jumps away (typing appears "blocked").
+            if (!readOnly) setSelectionLabel(toRangeLabel(range));
           }}
           afterSelectionEnd={(r, c, r2, c2) => {
             const hot = hotRef.current?.hotInstance;
@@ -2448,6 +2618,11 @@ const HandsontableWorkbook = React.forwardRef<
             lastSelectionRef.current = range;
             sheetSelectionRef.current[activeSheetIndexRef.current] = range;
             setSelectionLabel(toRangeLabel(range));
+            if (readOnly) {
+              const v = hot.getDataAtCell(range.startRow, range.startCol);
+              setFormulaInput(v == null ? "" : String(v));
+              return;
+            }
             syncToolbarFromCell(hot, r, c);
           }}
           afterMergeCells={() => {
