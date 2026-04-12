@@ -46,6 +46,8 @@ interface HandsontableWorkbookProps {
   onChange: (next: { sheets: SheetData[] }) => void;
   /** When true, only cells tagged with `meta-fillable` can be edited (runtime / preview). When false, the full template is editable (builder / import). */
   readOnly?: boolean;
+  /** Pixel height of the Handsontable viewport when `readOnly` (default 380). */
+  readOnlyHotHeight?: number;
 }
 
 export type HandsontableWorkbookRef = {
@@ -514,14 +516,18 @@ const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 const HandsontableWorkbook = React.forwardRef<
   HandsontableWorkbookRef,
   HandsontableWorkbookProps
->(function HandsontableWorkbook({ data, onChange, readOnly = false }, ref) {
+>(function HandsontableWorkbook(
+  { data, onChange, readOnly = false, readOnlyHotHeight },
+  ref,
+) {
   const workbookRef = React.useRef<{ sheets: SheetData[] }>({
     sheets: normalizeSheets(data).map(deepCloneSheet),
   });
   const lastIncomingSignatureRef = React.useRef(
     workbookSignature(normalizeSheets(data).map(deepCloneSheet)),
   );
-  const readOnlyEmitTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
+  /** Preview (`readOnly`): edits stay local until focus leaves the workbook; then we sync once. */
+  const readOnlyPreviewDirtyRef = React.useRef(false);
 
   const [activeSheetIndex, setActiveSheetIndex] = React.useState(0);
   const activeSheetIndexRef = React.useRef(0);
@@ -1250,7 +1256,6 @@ const HandsontableWorkbook = React.forwardRef<
   React.useEffect(
     () => () => {
       flushPendingColorTimers();
-      clearTimeout(readOnlyEmitTimerRef.current);
     },
     [flushPendingColorTimers],
   );
@@ -1999,7 +2004,17 @@ const HandsontableWorkbook = React.forwardRef<
   // ─── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      onBlur={(e) => {
+        if (!readOnly) return;
+        const next = e.relatedTarget as Node | null;
+        if (next && e.currentTarget.contains(next)) return;
+        if (!readOnlyPreviewDirtyRef.current) return;
+        readOnlyPreviewDirtyRef.current = false;
+        emitWorkbookToParent();
+      }}
+    >
       <style>{`
         .meta-bold { font-weight: 700 !important; }
         .meta-italic { font-style: italic !important; }
@@ -2543,7 +2558,7 @@ const HandsontableWorkbook = React.forwardRef<
           trimWhitespace={false}
           width="100%"
           stretchH={stretchColumnsInPreview ? "all" : "none"}
-          height={readOnly ? 380 : 320}
+          height={readOnly ? readOnlyHotHeight ?? 380 : 320}
           formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
           mergeCells={
             renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly
@@ -2650,10 +2665,7 @@ const HandsontableWorkbook = React.forwardRef<
                   ...sheet,
                   grid: newGrid,
                 };
-                clearTimeout(readOnlyEmitTimerRef.current);
-                readOnlyEmitTimerRef.current = setTimeout(() => {
-                  emitWorkbookToParent();
-                }, 15000);
+                readOnlyPreviewDirtyRef.current = true;
               }
             }
           }}

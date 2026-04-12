@@ -20,6 +20,10 @@ import HandsontableWorkbook, {
   MAX_PREVIEW_COLS,
   MAX_PREVIEW_ROWS,
 } from "./HandsontableWorkbook";
+import {
+  EXCEL_PREVIEW_SHEET_FRAME_CLASS,
+  getExcelPreviewHotHeightPx,
+} from "./excelSheetPreviewLayout";
 
 /** Shrink template workbooks before read-only preview so Handsontable/normalize never walks huge grids. */
 function truncateWorkbookForReadOnlyPreview(
@@ -116,19 +120,27 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
     });
   }, [workbook, useLocalExcelState, excelReadOnly]);
 
+  const readOnlyHotHeight = React.useMemo(
+    () => (excelReadOnly ? getExcelPreviewHotHeightPx() : undefined),
+    [excelReadOnly],
+  );
+
   return (
     <div className="space-y-2">
-      <HandsontableWorkbook
-        data={data}
-        readOnly={excelReadOnly}
-        onChange={(next) => {
-          if (useLocalExcelState) {
-            setLocalExcelState((prev) => ({ ...prev, [fieldName]: next }));
-            return;
-          }
-          onFieldChange(fieldName, next);
-        }}
-      />
+      <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
+        <HandsontableWorkbook
+          data={data}
+          readOnly={excelReadOnly}
+          readOnlyHotHeight={readOnlyHotHeight}
+          onChange={(next) => {
+            if (useLocalExcelState) {
+              setLocalExcelState((prev) => ({ ...prev, [fieldName]: next }));
+              return;
+            }
+            onFieldChange(fieldName, next);
+          }}
+        />
+      </div>
       {templateExceedsPreview && (
         <p className="text-xs text-amber-800 border border-amber-200 rounded bg-amber-50 px-2 py-1">
           Form preview loads only the first {MAX_PREVIEW_ROWS} rows ×{" "}
@@ -456,7 +468,10 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
                   </Button>
                 ))}
               </div>
-              <div className="overflow-auto border rounded-md max-h-[380px]">
+              <div
+                className={`overflow-auto border rounded-md bg-background ${EXCEL_PREVIEW_SHEET_FRAME_CLASS}`}
+                style={{ maxHeight: getExcelPreviewHotHeightPx() }}
+              >
                 <table className="w-full border-collapse text-xs">
                   <tbody>
                     {rows.map((row: any[], rIdx: number) => (

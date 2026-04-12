@@ -12,7 +12,13 @@ import { Badge } from "./ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { ScrollArea } from "./ui/scroll-area";
-import { formatDate } from "../lib/utils";
+import { cn, formatDate } from "../lib/utils";
+import {
+  EXCEL_PREVIEW_DIALOG_CONTENT_CLASS,
+  EXCEL_PREVIEW_SHEET_FRAME_CLASS,
+  formDefinitionHasEmbeddedExcel,
+  getExcelPreviewHotHeightPx,
+} from "./form-builder/excelSheetPreviewLayout";
 import { FileText, User, Ship, Calendar, Clock, CheckCircle, XCircle, AlertCircle, FileDown } from "lucide-react";
 import { Button } from "./ui/button";
 import SubmissionPdfDocument from "./pdf/SubmissionPdfDocument";
@@ -120,6 +126,12 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
       };
   }
 
+  const excelPreviewHotHeight = getExcelPreviewHotHeightPx();
+  const hasEmbeddedExcelForm = formDefinitionHasEmbeddedExcel(
+    submission.form?.fields,
+    submission.form?.sections,
+  );
+
   // Helper function to render form data
   const renderFormData = (data: any, fields: any[]) => {
     if (!data || !fields) return null;
@@ -174,11 +186,12 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
               ? data[field.name]
               : field.excelTemplate;
           value = workbookData?.sheets?.length ? (
-            <div className="max-h-[min(70vh,520px)] overflow-auto border rounded-md bg-background">
+            <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
               <HandsontableWorkbook
                 data={workbookData}
                 onChange={() => {}}
                 readOnly
+                readOnlyHotHeight={excelPreviewHotHeight}
               />
             </div>
           ) : (
@@ -312,7 +325,13 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl max-h-[90vh]">
+      <DialogContent
+        className={cn(
+          hasEmbeddedExcelForm
+            ? EXCEL_PREVIEW_DIALOG_CONTENT_CLASS
+            : "max-w-6xl max-h-[90vh]",
+        )}
+      >
         <DialogHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-start sm:space-y-0 sm:gap-4">
           <div className="space-y-1.5">
             <DialogTitle className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -27,6 +27,11 @@ import FieldPalette from "../../components/form-builder/FieldPalette";
 import FormCanvas from "../../components/form-builder/FormCanvas";
 import PropertiesPanel from "../../components/form-builder/PropertiesPanel";
 import PreviewForm from "../../components/form-builder/PreviewForm";
+import {
+  EXCEL_PREVIEW_DIALOG_CONTENT_CLASS,
+  formDefinitionHasEmbeddedExcel,
+} from "../../components/form-builder/excelSheetPreviewLayout";
+import { cn } from "../../lib/utils";
 
 interface FormBuilderState {
   title: string;
@@ -100,6 +105,11 @@ const FormBuilder: React.FC = () => {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [validationErrors, setValidationErrors] = useState<FormValidationErrors>({});
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  const previewHasEmbeddedExcel = useMemo(
+    () => formDefinitionHasEmbeddedExcel(formState.fields, formState.sections),
+    [formState.fields, formState.sections],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -740,7 +750,13 @@ const FormBuilder: React.FC = () => {
                       <Eye className="w-4 h-4" />
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto mx-4">
+                  <DialogContent
+                    className={cn(
+                      previewHasEmbeddedExcel
+                        ? EXCEL_PREVIEW_DIALOG_CONTENT_CLASS
+                        : "mx-4 max-h-[80vh] max-w-4xl overflow-y-auto",
+                    )}
+                  >
                     <DialogHeader>
                       <DialogTitle>Form Preview - {formState.title}</DialogTitle>
                     </DialogHeader>
