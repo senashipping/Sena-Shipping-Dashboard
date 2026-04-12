@@ -2207,7 +2207,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           height={320}
           formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
           mergeCells={
-            renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly
+            renderedMergeCells.length > 0
+              ? renderedMergeCells
+              : readOnly
+                ? undefined
+                : true
           }
           filters={!readOnly}
           dropdownMenu={!readOnly}
@@ -2269,7 +2273,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           afterColumnResize={() => flushLayoutToParent()}
           afterRowResize={() => flushLayoutToParent()}
           afterChange={(changes, source) => {
-            refreshUndoRedoState();
+            if (!readOnly) refreshUndoRedoState();
             if (readOnly && changes && source !== "loadData") {
               const idx = activeSheetIndexRef.current;
               const sheet = workbookRef.current.sheets[idx];
@@ -2342,7 +2346,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             lastSelectionRef.current = range;
             sheetSelectionRef.current[activeSheetIndexRef.current] = range;
             setSelectionLabel(toRangeLabel(range));
-            syncToolbarFromCell(hot, r, c);
+            if (!readOnly) syncToolbarFromCell(hot, r, c);
           }}
           afterMergeCells={() => {
             if (!readOnly) {

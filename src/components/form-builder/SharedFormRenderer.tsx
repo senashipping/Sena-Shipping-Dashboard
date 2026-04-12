@@ -48,14 +48,8 @@ function truncateWorkbookForReadOnlyPreview(
           m.row < rows &&
           m.col < cols,
       );
-      const images = (sheet.images || []).filter(
-        (img: any) =>
-          img &&
-          Number.isFinite(+img.row) &&
-          Number.isFinite(+img.col) &&
-          img.row < rows &&
-          img.col < cols,
-      );
+      // Drop images in this path — large data URLs decode in Handsontable and can freeze or crash the tab.
+      const images: any[] = [];
       return {
         ...sheet,
         grid: slicedGrid,

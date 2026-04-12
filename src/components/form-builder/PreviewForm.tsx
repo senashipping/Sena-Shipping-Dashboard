@@ -1,5 +1,7 @@
-import { useState, type FC } from "react";
+import { useMemo, useState, type FC } from "react";
 import { Button } from "../ui/button";
+import { Label } from "../ui/label";
+import { Checkbox } from "../ui/checkbox";
 import SharedFormRenderer from "./SharedFormRenderer";
 import { FormField, FormSection, TableConfig } from "../../types";
 
@@ -16,9 +18,27 @@ interface PreviewFormProps {
   isSubmitting?: boolean;
 }
 
+function formHasEmbeddedExcel(formState: PreviewFormProps["formState"]): boolean {
+  const inFields = (fields?: FormField[]) =>
+    Boolean(fields?.some((f) => f.type === "embedded_excel"));
+  if (inFields(formState.fields)) return true;
+  if (formState.formType === "mixed") {
+    return formState.sections.some(
+      (s) => s.type === "fields" && inFields(s.fields),
+    );
+  }
+  return false;
+}
+
 const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting = false }) => {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
+  /** Full Handsontable in-dialog is heavy; default to a simple grid preview (opt in for fillable testing). */
+  const [interactiveExcelPreview, setInteractiveExcelPreview] = useState(false);
+  const hasEmbeddedExcel = useMemo(
+    () => formHasEmbeddedExcel(formState),
+    [formState],
+  );
 
   const handleFieldChange = (fieldName: string, value: any) => {
     setFormData((prev) => ({
@@ -83,19 +103,40 @@ const PreviewForm: FC<PreviewFormProps> = ({ formState, onSubmit, isSubmitting =
   );
 
   return (
-    <SharedFormRenderer
-      formState={formState}
-      formData={formData}
-      tableData={tableData}
-      onFieldChange={handleFieldChange}
-      onTableChange={handleTableChange}
-      onMixedTableChange={handleMixedTableChange}
-      onAddTableRow={handleAddTableRow}
-      onRemoveTableRow={handleRemoveTableRow}
-      useLocalExcelState
-      excelReadOnly
-      submitButton={submitButton}
-    />
+    <div className="space-y-4">
+      {hasEmbeddedExcel && (
+        <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          <Checkbox
+            id="preview-interactive-excel"
+            checked={interactiveExcelPreview}
+            onCheckedChange={(v) => setInteractiveExcelPreview(v === true)}
+          />
+          <div className="space-y-1 leading-snug">
+            <Label htmlFor="preview-interactive-excel" className="font-medium cursor-pointer">
+              Interactive spreadsheet preview
+            </Label>
+            <p className="text-xs opacity-90">
+              Leave off for a fast layout preview. Turn on only if you need to try fillable cells here; large
+              templates can stress the browser.
+            </p>
+          </div>
+        </div>
+      )}
+      <SharedFormRenderer
+        formState={formState}
+        formData={formData}
+        tableData={tableData}
+        onFieldChange={handleFieldChange}
+        onTableChange={handleTableChange}
+        onMixedTableChange={handleMixedTableChange}
+        onAddTableRow={handleAddTableRow}
+        onRemoveTableRow={handleRemoveTableRow}
+        useLocalExcelState
+        excelReadOnly
+        lightweightExcelPreview={!interactiveExcelPreview}
+        submitButton={submitButton}
+      />
+    </div>
   );
 };
 
