@@ -44,6 +44,7 @@ type SheetData = {
 interface HandsontableWorkbookProps {
   data: { sheets: SheetData[] };
   onChange: (next: { sheets: SheetData[] }) => void;
+  /** When true, only cells tagged with `meta-fillable` can be edited (runtime / preview). When false, the full template is editable (builder / import). */
   readOnly?: boolean;
 }
 
@@ -140,6 +141,17 @@ const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
   }));
 };
 
+/** Include row/col pixel sizes so incoming `data` syncs when only dimensions change. */
+const dimListSignature = (arr?: number[]) => {
+  if (!arr?.length) return "";
+  if (arr.length > 400) {
+    let sum = 0;
+    for (let i = 0; i < arr.length; i++) sum += Number(arr[i]) || 0;
+    return `${arr.length}:sum${sum}:a${arr[0]}:z${arr[arr.length - 1]}`;
+  }
+  return arr.join(",");
+};
+
 const workbookSignature = (sheets: SheetData[]) =>
   sheets
     .map((s) =>
@@ -149,6 +161,8 @@ const workbookSignature = (sheets: SheetData[]) =>
         `m${s.mergeCells?.length || 0}`,
         `c${s.cellMeta?.length || 0}`,
         s.tabColor || "",
+        `cw${dimListSignature(s.colWidthsPx)}`,
+        `rh${dimListSignature(s.rowHeightsPx)}`,
       ].join("|"),
     )
     .join("::");
@@ -188,12 +202,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   onChange,
   readOnly = false,
 }) => {
-  const initialSheets = React.useMemo(() => normalizeSheets(data), []);
   const workbookRef = React.useRef<{ sheets: SheetData[] }>({
-    sheets: initialSheets,
+    sheets: normalizeSheets(data),
   });
   const lastIncomingSignatureRef = React.useRef(
-    workbookSignature(initialSheets),
+    workbookSignature(normalizeSheets(data)),
   );
 
   const [activeSheetIndex, setActiveSheetIndex] = React.useState(0);
@@ -259,6 +272,13 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   >({});
 
   const hotRef = React.useRef<any>(null);
+
+  const textColorApplyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const fillColorApplyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const safeSheets = workbookRef.current.sheets;
   const activeSheet =
@@ -334,12 +354,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   // ─── selection helpers ──────────────────────────────────────────────────────
 
   /**
-   * Returns the current selection range.
-   * Priority: HOT live selection → lastSelectionRef fallback.
-   * Does NOT call selectCell — avoids stealing focus.
+   * Snapshot selection from HOT at action time (getSelectedRangeLast first).
+   * Use this in toolbar handlers instead of reading selection after focus moved.
    */
-  const getSelectedRange = React.useCallback(() => {
-    const hot = hotRef.current?.hotInstance;
+  const getToolbarActionRange = React.useCallback((hot: any) => {
+    if (!hot) return null;
     const sheet = workbookRef.current.sheets[activeSheetIndex];
     const rowCount = Math.max(1, sheet?.grid?.length || 1);
     const colCount = Math.max(1, sheet?.grid?.[0]?.length || 1);
@@ -377,47 +396,64 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       });
     }
 
-    // Try live HOT selection first
-    if (hot) {
-      const rangeObj =
-        typeof hot.getSelectedRangeLast === "function"
-          ? hot.getSelectedRangeLast()
-          : null;
-      if (rangeObj?.from && rangeObj?.to) {
-        const r = clamp({
-          startRow: rangeObj.from.row,
-          endRow: rangeObj.to.row,
-          startCol: rangeObj.from.col,
-          endCol: rangeObj.to.col,
-        });
-        lastSelectionRef.current = r;
-        sheetSelectionRef.current[activeSheetIndex] = r;
-        return r;
-      }
-
-      const sel = hot.getSelectedLast?.();
-      if (
-        sel &&
-        sel.length >= 4 &&
-        sel.every((v: any) => Number.isInteger(v))
-      ) {
-        const r = clamp({
-          startRow: sel[0],
-          endRow: sel[2],
-          startCol: sel[1],
-          endCol: sel[3],
-        });
-        lastSelectionRef.current = r;
-        sheetSelectionRef.current[activeSheetIndex] = r;
-        return r;
-      }
+    const sel =
+      typeof hot.getSelectedRangeLast === "function"
+        ? hot.getSelectedRangeLast()
+        : null;
+    if (sel?.from != null && sel?.to != null) {
+      const r = clamp({
+        startRow: sel.from.row,
+        endRow: sel.to.row,
+        startCol: sel.from.col,
+        endCol: sel.to.col,
+      });
+      lastSelectionRef.current = r;
+      sheetSelectionRef.current[activeSheetIndex] = r;
+      return r;
     }
 
-    // Fall back to persisted selection for this sheet
+    const last = hot.getSelectedLast?.();
+    if (
+      last &&
+      last.length >= 4 &&
+      last.every((v: any) => Number.isInteger(v))
+    ) {
+      const r = clamp({
+        startRow: last[0],
+        endRow: last[2],
+        startCol: last[1],
+        endCol: last[3],
+      });
+      lastSelectionRef.current = r;
+      sheetSelectionRef.current[activeSheetIndex] = r;
+      return r;
+    }
+
     const cached =
       sheetSelectionRef.current[activeSheetIndex] || lastSelectionRef.current;
     return clamp(cached);
   }, [activeSheetIndex, formatAllCells]);
+
+  const restoreHotRange = (
+    hot: any,
+    range: {
+      startRow: number;
+      endRow: number;
+      startCol: number;
+      endCol: number;
+    } | null,
+  ) => {
+    if (!hot || !range) return;
+    hot.render();
+    hot.selectCell(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol,
+      false,
+      false,
+    );
+  };
 
   const refreshUndoRedoState = React.useCallback(() => {
     const hot = hotRef.current?.hotInstance;
@@ -555,13 +591,52 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         name: `Sheet${activeSheetIndex + 1}`,
         grid: [[""]],
       };
+
+      const rowCount =
+        typeof hot.countRows === "function" ? hot.countRows() : nextGrid.length;
+      const colCount =
+        typeof hot.countCols === "function"
+          ? hot.countCols()
+          : Math.max(
+              1,
+              ...nextGrid.map((row: any[]) =>
+                Array.isArray(row) ? row.length : 0,
+              ),
+            );
+
+      const colWidthsPx: number[] = [];
+      for (let c = 0; c < colCount; c++) {
+        const w =
+          typeof hot.getColWidth === "function" ? hot.getColWidth(c) : undefined;
+        const rounded =
+          typeof w === "number" && Number.isFinite(w) ? Math.round(w) : NaN;
+        colWidthsPx.push(
+          Number.isFinite(rounded)
+            ? rounded
+            : Math.round(Number(current.colWidthsPx?.[c]) || 50),
+        );
+      }
+
+      const rowHeightsPx: number[] = [];
+      for (let r = 0; r < rowCount; r++) {
+        const h =
+          typeof hot.getRowHeight === "function" ? hot.getRowHeight(r) : undefined;
+        const rounded =
+          typeof h === "number" && Number.isFinite(h) ? Math.round(h) : NaN;
+        rowHeightsPx.push(
+          Number.isFinite(rounded)
+            ? rounded
+            : Math.round(Number(current.rowHeightsPx?.[r]) || 24),
+        );
+      }
+
       workbookRef.current.sheets[activeSheetIndex] = {
         ...current,
         grid: nextGrid,
         mergeCells,
         cellMeta,
-        colWidthsPx: current.colWidthsPx,
-        rowHeightsPx: current.rowHeightsPx,
+        colWidthsPx,
+        rowHeightsPx,
       };
     },
     [activeSheetIndex],
@@ -660,8 +735,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   const applyClassToSelection = React.useCallback(
     (classToken: string, toggle = false, replacePrefix?: string) => {
       const hot = hotRef.current?.hotInstance;
-      const range = getSelectedRange();
-      if (!hot || !range || readOnly) return;
+      if (!hot || readOnly) return;
+      const range = getToolbarActionRange(hot);
+      if (!range) return;
       const prefix = replacePrefix || classToken;
 
       const apply = () => {
@@ -686,10 +762,10 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
       if (typeof hot.batch === "function") hot.batch(apply);
       else apply();
-      hot.render();
       collectCurrentSheetFromHot(true);
+      restoreHotRange(hot, range);
     },
-    [getSelectedRange, readOnly, collectCurrentSheetFromHot],
+    [getToolbarActionRange, readOnly, collectCurrentSheetFromHot],
   );
 
   const setFontStyle = (style: "bold" | "italic" | "underline" | "strike") => {
@@ -721,12 +797,51 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   const applyFontSize = () =>
     applyClassToSelection(`meta-size-${fontSize}`, false, "meta-size-");
 
+  const flushPendingColorTimers = React.useCallback(() => {
+    if (textColorApplyTimerRef.current) {
+      clearTimeout(textColorApplyTimerRef.current);
+      textColorApplyTimerRef.current = null;
+    }
+    if (fillColorApplyTimerRef.current) {
+      clearTimeout(fillColorApplyTimerRef.current);
+      fillColorApplyTimerRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => () => flushPendingColorTimers(), [flushPendingColorTimers]);
+
+  const scheduleApplyTextColorValue = React.useCallback(
+    (hex: string) => {
+      if (textColorApplyTimerRef.current)
+        clearTimeout(textColorApplyTimerRef.current);
+      textColorApplyTimerRef.current = setTimeout(() => {
+        textColorApplyTimerRef.current = null;
+        applyClassToSelection(`meta-color-${hex}`, false, "meta-color-");
+      }, 150);
+    },
+    [applyClassToSelection],
+  );
+
+  const scheduleApplyFillColorValue = React.useCallback(
+    (hex: string) => {
+      if (fillColorApplyTimerRef.current)
+        clearTimeout(fillColorApplyTimerRef.current);
+      fillColorApplyTimerRef.current = setTimeout(() => {
+        fillColorApplyTimerRef.current = null;
+        applyClassToSelection(`meta-fill-${hex}`, false, "meta-fill-");
+      }, 150);
+    },
+    [applyClassToSelection],
+  );
+
   const applyTextColor = () => {
+    flushPendingColorTimers();
     const hex = textColor.replace("#", "");
     applyClassToSelection(`meta-color-${hex}`, false, "meta-color-");
   };
 
   const applyFillColor = () => {
+    flushPendingColorTimers();
     const hex = fillColor.replace("#", "");
     applyClassToSelection(`meta-fill-${hex}`, false, "meta-fill-");
   };
@@ -737,8 +852,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     kind: "number" | "currency" | "percent" | "date",
   ) => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
 
     const apply = () => {
       for (let r = range.startRow; r <= range.endRow; r++) {
@@ -780,16 +896,17 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
     if (typeof hot.batch === "function") hot.batch(apply);
     else apply();
-    hot.render();
     collectCurrentSheetFromHot(true);
+    restoreHotRange(hot, range);
   };
 
   // ─── validation helpers ─────────────────────────────────────────────────────
 
   const applyDropdownValidation = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     const source = dropdownSource
       .split(",")
       .map((v) => v.trim())
@@ -801,14 +918,15 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         hot.setCellMeta(r, c, "strict", true);
       }
     }
-    hot.render();
     collectCurrentSheetFromHot(true);
+    restoreHotRange(hot, range);
   };
 
   const applyDateCellType = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     for (let r = range.startRow; r <= range.endRow; r++) {
       for (let c = range.startCol; c <= range.endCol; c++) {
         hot.setCellMeta(r, c, "type", "date");
@@ -816,13 +934,15 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         hot.setCellMeta(r, c, "correctFormat", true);
       }
     }
-    hot.render();
     collectCurrentSheetFromHot(true);
+    restoreHotRange(hot, range);
   };
 
   const toggleFillableSelection = () => {
-    const range = getSelectedRange();
-    if (!range || readOnly) return;
+    const hot = hotRef.current?.hotInstance;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
 
     applyClassToSelection("meta-fillable", false);
 
@@ -856,22 +976,26 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
     sheet.cellMeta = Array.from(metaByKey.values());
     onChange({ sheets: [...workbookRef.current.sheets] });
+    restoreHotRange(hot, range);
   };
 
   // ─── sort / find-replace ────────────────────────────────────────────────────
 
   const sortSelectedColumn = (order: "asc" | "desc") => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range) return;
+    if (!hot) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     const sorting = hot.getPlugin?.("columnSorting");
     if (typeof sorting?.sort === "function")
       sorting.sort({ column: range.startCol, sortOrder: order });
+    restoreHotRange(hot, range);
   };
 
   const doFindReplace = () => {
     const hot = hotRef.current?.hotInstance;
     if (!hot || !findValue || readOnly) return;
+    const range = getToolbarActionRange(hot);
     const data = hot.getData();
     for (let r = 0; r < data.length; r++) {
       for (let c = 0; c < data[r].length; c++) {
@@ -881,44 +1005,55 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       }
     }
     collectCurrentSheetFromHot(false);
+    if (range) restoreHotRange(hot, range);
   };
 
   // ─── undo / redo ────────────────────────────────────────────────────────────
 
   const undoAction = () => {
-    const ur = hotRef.current?.hotInstance?.getPlugin?.("undoRedo");
+    const hot = hotRef.current?.hotInstance;
+    const ur = hot?.getPlugin?.("undoRedo");
     if (!ur?.undo || readOnly) return;
+    const r = lastSelectionRef.current;
     ur.undo();
     refreshUndoRedoState();
+    if (hot && r) restoreHotRange(hot, r);
   };
 
   const redoAction = () => {
-    const ur = hotRef.current?.hotInstance?.getPlugin?.("undoRedo");
+    const hot = hotRef.current?.hotInstance;
+    const ur = hot?.getPlugin?.("undoRedo");
     if (!ur?.redo || readOnly) return;
+    const r = lastSelectionRef.current;
     ur.redo();
     refreshUndoRedoState();
+    if (hot && r) restoreHotRange(hot, r);
   };
 
   // ─── merge ──────────────────────────────────────────────────────────────────
 
   const mergeSelection = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    const plugin = hot?.getPlugin?.("mergeCells");
-    if (!hot || !plugin || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
+    const plugin = hot.getPlugin?.("mergeCells");
+    if (!plugin) return;
     plugin.merge(range.startRow, range.startCol, range.endRow, range.endCol);
-    hot.render();
     collectCurrentSheetFromHot(true);
+    restoreHotRange(hot, range);
   };
 
   const unmergeSelection = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    const plugin = hot?.getPlugin?.("mergeCells");
-    if (!hot || !plugin || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
+    const plugin = hot.getPlugin?.("mergeCells");
+    if (!plugin) return;
     plugin.unmerge(range.startRow, range.startCol, range.endRow, range.endCol);
-    hot.render();
     collectCurrentSheetFromHot(true);
+    restoreHotRange(hot, range);
   };
 
   // ─── row / col operations ───────────────────────────────────────────────────
@@ -933,8 +1068,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       | "remove_col",
   ) => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     if (kind === "insert_row_above")
       hot.alter("insert_row_above", range.startRow, 1);
     if (kind === "insert_row_below")
@@ -956,12 +1092,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       );
     collectCurrentSheetFromHot(true);
     refreshUndoRedoState();
+    restoreHotRange(hot, range);
   };
 
   const clearSelectionValues = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     const updates: [number, number, string][] = [];
     for (let r = range.startRow; r <= range.endRow; r++)
       for (let c = range.startCol; c <= range.endCol; c++)
@@ -969,12 +1107,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     hot.setDataAtCell(updates);
     collectCurrentSheetFromHot(false);
     refreshUndoRedoState();
+    restoreHotRange(hot, range);
   };
 
   const clearSelectionFormatting = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     const apply = () => {
       for (let r = range.startRow; r <= range.endRow; r++) {
         for (let c = range.startCol; c <= range.endCol; c++) {
@@ -995,35 +1135,39 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     };
     if (typeof hot.batch === "function") hot.batch(apply);
     else apply();
-    hot.render();
     collectCurrentSheetFromHot(true);
+    restoreHotRange(hot, range);
   };
 
   // ─── formula bar ────────────────────────────────────────────────────────────
 
   const applyFormulaBar = () => {
     const hot = hotRef.current?.hotInstance;
-    const range = getSelectedRange();
-    if (!hot || !range || readOnly) return;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
     hot.setDataAtCell(range.startRow, range.startCol, formulaInput);
-    // Re-focus the grid cell after applying so keyboard nav works
-    hot.selectCell(
-      range.startRow,
-      range.startCol,
-      range.endRow,
-      range.endCol,
-      false,
-      false,
-    );
     collectCurrentSheetFromHot(false);
+    restoreHotRange(hot, range);
   };
 
   // ─── export ─────────────────────────────────────────────────────────────────
 
   const emitWorkbookSnapshot = () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
-    onChange({ sheets: workbookRef.current.sheets });
+    onChange({
+      sheets: workbookRef.current.sheets.map((s) => ({ ...s })),
+    });
   };
+
+  /** Persist column/row sizes to template and parent (e.g. before "Save Changes" without toolbar Save). */
+  const flushLayoutToParent = React.useCallback(() => {
+    if (readOnly) return;
+    collectCurrentSheetFromHot(true);
+    onChange({
+      sheets: workbookRef.current.sheets.map((s) => ({ ...s })),
+    });
+  }, [readOnly, collectCurrentSheetFromHot, onChange]);
 
   const exportXlsx = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -1120,9 +1264,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     }
   }, [data, readOnly]);
 
+  const incomingWorkbookKey = React.useMemo(
+    () => workbookSignature(normalizeSheets(data)),
+    [data],
+  );
+
   React.useEffect(() => {
     loadSheetIntoHot(activeSheetIndex);
-  }, [activeSheetIndex, loadSheetIntoHot]);
+  }, [activeSheetIndex, loadSheetIntoHot, incomingWorkbookKey]);
 
   // ─── cell renderer ───────────────────────────────────────────────────────────
 
@@ -1258,6 +1407,26 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     ],
   );
 
+  /**
+   * Runs after other plugins' `afterGetCellMeta` logic so template editing
+   * (`readOnly={false}`) always stays fully editable (e.g. formula engine meta).
+   */
+  const afterGetCellMeta = React.useCallback(
+    (_row: number, _col: number, cellProps: Record<string, unknown>) => {
+      if (!readOnly) {
+        (cellProps as { readOnly?: boolean }).readOnly = false;
+        return;
+      }
+      const cls = String((cellProps as { className?: string }).className || "");
+      const isFillable = cls
+        .split(" ")
+        .filter(Boolean)
+        .includes("meta-fillable");
+      (cellProps as { readOnly?: boolean }).readOnly = !isFillable;
+    },
+    [readOnly],
+  );
+
   // ─── Toolbar button wrapper — prevents focus loss ─────────────────────────
 
   const TB = ({
@@ -1317,6 +1486,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           <span
             className="px-2 text-xs font-medium border rounded bg-white min-w-[3rem] text-center"
             title="Active selection"
+            onMouseDown={noFocusSteal}
           >
             {selectionLabel}
           </span>
@@ -1348,7 +1518,28 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
           <select
             value={fontFamily}
-            onChange={(e) => setFontFamily(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFontFamily(v);
+              applyClassToSelection(
+                `meta-font-${v.replace(/\s+/g, "_")}`,
+                false,
+                "meta-font-",
+              );
+            }}
+            onBlur={() => {
+              const hot = hotRef.current?.hotInstance;
+              const r = lastSelectionRef.current;
+              if (hot)
+                hot.selectCell(
+                  r.startRow,
+                  r.startCol,
+                  r.endRow,
+                  r.endCol,
+                  false,
+                  false,
+                );
+            }}
             onMouseDown={noFocusSteal}
             className="h-8 px-2 text-sm border rounded"
           >
@@ -1362,7 +1553,24 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
           <input
             value={fontSize}
-            onChange={(e) => setFontSize(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFontSize(v);
+              applyClassToSelection(`meta-size-${v}`, false, "meta-size-");
+            }}
+            onBlur={() => {
+              const hot = hotRef.current?.hotInstance;
+              const r = lastSelectionRef.current;
+              if (hot)
+                hot.selectCell(
+                  r.startRow,
+                  r.startCol,
+                  r.endRow,
+                  r.endCol,
+                  false,
+                  false,
+                );
+            }}
             onMouseDown={noFocusSteal}
             className="w-14 h-8 px-2 text-sm border rounded"
           />
@@ -1375,7 +1583,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             <input
               type="color"
               value={textColor}
-              onChange={(e) => setTextColor(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setTextColor(val);
+                scheduleApplyTextColorValue(val.replace("#", ""));
+              }}
               onMouseDown={noFocusSteal}
               className="w-8 h-8 p-0 border rounded cursor-pointer"
               title="Text color"
@@ -1388,7 +1600,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             <input
               type="color"
               value={fillColor}
-              onChange={(e) => setFillColor(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFillColor(val);
+                scheduleApplyFillColorValue(val.replace("#", ""));
+              }}
               onMouseDown={noFocusSteal}
               className="w-8 h-8 p-0 border rounded cursor-pointer"
               title="Fill color"
@@ -1501,12 +1717,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           <input
             value={findValue}
             onChange={(e) => setFindValue(e.target.value)}
+            onMouseDown={noFocusSteal}
             placeholder="Find"
             className="h-8 px-2 text-sm border rounded w-24"
           />
           <input
             value={replaceValue}
             onChange={(e) => setReplaceValue(e.target.value)}
+            onMouseDown={noFocusSteal}
             placeholder="Replace"
             className="h-8 px-2 text-sm border rounded w-24"
           />
@@ -1515,7 +1733,14 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           <span className="mx-1 h-6 border-l" />
 
           <TB
-            onClick={() => setFormatAllCells((p) => !p)}
+            onClick={() => {
+              const hot = hotRef.current?.hotInstance;
+              const r = lastSelectionRef.current;
+              setFormatAllCells((p) => !p);
+              queueMicrotask(() => {
+                if (hot && r) restoreHotRange(hot, r);
+              });
+            }}
             active={formatAllCells}
             title="Apply formatting to ALL cells in sheet"
           >
@@ -1544,11 +1769,13 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                 applyFormulaBar();
               }
               if (e.key === "Escape") {
+                e.preventDefault();
                 const hot = hotRef.current?.hotInstance;
-                const range = getSelectedRange();
-                if (hot && range) {
-                  const v = hot.getDataAtCell(range.startRow, range.startCol);
+                const r = lastSelectionRef.current;
+                if (hot) {
+                  const v = hot.getDataAtCell(r.startRow, r.startCol);
                   setFormulaInput(v == null ? "" : String(v));
+                  restoreHotRange(hot, r);
                 }
               }
             }}
@@ -1639,6 +1866,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
                   type="button"
                   variant="outline"
                   size="sm"
+                  onMouseDown={noFocusSteal}
                   onClick={() => setRenaming(false)}
                 >
                   Cancel
@@ -1704,6 +1932,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             <input
               value={dropdownSource}
               onChange={(e) => setDropdownSource(e.target.value)}
+              onMouseDown={noFocusSteal}
               className="h-8 px-2 text-sm border rounded"
               placeholder="Dropdown: A,B,C"
             />
@@ -1753,8 +1982,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           colHeaders
           licenseKey="non-commercial-and-evaluation"
           readOnly={false}
+          trimWhitespace={false}
           width="100%"
-          stretchH="all"
+          stretchH={readOnly ? "all" : "none"}
           height={320}
           formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
           mergeCells={
@@ -1812,6 +2042,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           autoWrapRow
           autoWrapCol
           cells={cellsCallback}
+          afterGetCellMeta={afterGetCellMeta}
+          afterColumnResize={() => flushLayoutToParent()}
+          afterRowResize={() => flushLayoutToParent()}
           afterChange={() => refreshUndoRedoState()}
           afterSelection={(r, c, r2, c2) => {
             if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0)
