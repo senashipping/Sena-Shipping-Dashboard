@@ -9,7 +9,7 @@ import ExcelJS from "exceljs";
 
 registerAllModules();
 
-type SheetData = {
+export type SheetData = {
   name: string;
   grid: string[][];
   mergeCells?: Array<{
@@ -48,6 +48,14 @@ interface HandsontableWorkbookProps {
   readOnly?: boolean;
 }
 
+export type HandsontableWorkbookRef = {
+  /**
+   * Builder: reads the live grid from Handsontable (cells, merges, meta, col/row sizes) into `workbookRef`, then returns a deep clone for persistence.
+   * Read-only: returns the current in-memory workbook without re-collecting from HOT (avoids truncating the full template).
+   */
+  getWorkbookSnapshot: () => { sheets: SheetData[] } | null;
+};
+
 /** Capped grid for read-only / form preview so imports with huge dimensions stay responsive. */
 export const MAX_PREVIEW_ROWS = 220;
 export const MAX_PREVIEW_COLS = 80;
@@ -64,6 +72,12 @@ const toSafeGrid = (rawGrid: unknown): string[][] => {
     Array.isArray(row) ? row.map((c) => (c == null ? "" : String(c))) : [""],
   );
   return rows.length > 0 ? rows : [[""]];
+};
+
+/** Handsontable mutates `data` in place — never pass the same nested refs stored in `workbookRef`. */
+const cloneEditableGrid = (rawGrid: unknown): string[][] => {
+  const g = toSafeGrid(rawGrid);
+  return g.map((row) => (Array.isArray(row) ? [...row] : [""]));
 };
 
 const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
@@ -140,10 +154,10 @@ const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
         : [],
     ),
     colWidthsPx: Array.isArray(sheet?.colWidthsPx)
-      ? sheet.colWidthsPx
+      ? [...sheet.colWidthsPx]
       : undefined,
     rowHeightsPx: Array.isArray(sheet?.rowHeightsPx)
-      ? sheet.rowHeightsPx
+      ? [...sheet.rowHeightsPx]
       : undefined,
     tabColor: sheet?.tabColor,
   }));
@@ -362,16 +376,18 @@ const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 
 // ─── component ────────────────────────────────────────────────────────────────
 
-const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
-  data,
-  onChange,
-  readOnly = false,
-}) => {
+const HandsontableWorkbook = React.forwardRef<
+  HandsontableWorkbookRef,
+  HandsontableWorkbookProps
+>(function HandsontableWorkbook(
+  { data, onChange, readOnly = false },
+  ref,
+) {
   const workbookRef = React.useRef<{ sheets: SheetData[] }>({
-    sheets: normalizeSheets(data),
+    sheets: normalizeSheets(data).map(deepCloneSheet),
   });
   const lastIncomingSignatureRef = React.useRef(
-    workbookSignature(normalizeSheets(data)),
+    workbookSignature(normalizeSheets(data).map(deepCloneSheet)),
   );
 
   const [activeSheetIndex, setActiveSheetIndex] = React.useState(0);
@@ -391,7 +407,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const first = workbookRef.current.sheets[0];
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
-    if (!readOnly) return base;
+    if (!readOnly) return cloneEditableGrid(base);
     const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
     const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
     return base
@@ -504,6 +520,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     if (!readOnly) return activeSheet.rowHeightsPx;
     return (activeSheet.rowHeightsPx || []).slice(0, previewRows);
   }, [readOnly, activeSheet.rowHeightsPx, previewRows]);
+
+  /** `stretchH="all"` ignores fixed `colWidthsPx`; only use it when the template has no saved widths. */
+  const stretchColumnsInPreview =
+    readOnly &&
+    (!Array.isArray(activeSheet.colWidthsPx) ||
+      activeSheet.colWidthsPx.length === 0);
 
   const currentCellCount = renderedGrid.reduce(
     (t, row) => t + (Array.isArray(row) ? row.length : 0),
@@ -839,6 +861,19 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     [readOnly],
   );
 
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      getWorkbookSnapshot: () => {
+        if (!readOnly) collectCurrentSheetFromHot(true);
+        return {
+          sheets: workbookRef.current.sheets.map(deepCloneSheet),
+        };
+      },
+    }),
+    [readOnly, collectCurrentSheetFromHot],
+  );
+
   const emitWorkbookToParent = React.useCallback(() => {
     onChange({
       sheets: workbookRef.current.sheets.map(deepCloneSheet),
@@ -848,7 +883,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
       const base = sheet?.grid?.length ? sheet.grid : [[""]];
-      if (!readOnly) return base;
+      if (!readOnly) return cloneEditableGrid(base);
       const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
       const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
       return base
@@ -1395,8 +1430,9 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
 
   const exportXlsx = async () => {
+    if (!readOnly) collectCurrentSheetFromHot(true);
     const workbook = new ExcelJS.Workbook();
-    safeSheets.forEach((sheet) => {
+    workbookRef.current.sheets.forEach((sheet) => {
       const ws = workbook.addWorksheet(sheet.name || "Sheet");
       sheet.grid.forEach((row) => ws.addRow(row));
     });
@@ -1413,7 +1449,16 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   };
 
   const exportCsv = () => {
-    const csv = safeGrid
+    if (!readOnly) collectCurrentSheetFromHot(true);
+    const sheets = workbookRef.current.sheets;
+    const idx = Math.min(
+      Math.max(0, activeSheetIndexRef.current),
+      Math.max(0, sheets.length - 1),
+    );
+    const sh = sheets[idx];
+    const grid =
+      Array.isArray(sh?.grid) && sh.grid.length > 0 ? sh.grid : [[""]];
+    const csv = grid
       .map((row) =>
         row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","),
       )
@@ -1422,7 +1467,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${activeSheet?.name || "sheet"}.csv`;
+    a.download = `${sh?.name || "sheet"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1430,9 +1475,13 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   // ─── sheet management ────────────────────────────────────────────────────────
 
   const duplicateActiveSheet = () => {
-    const cloned = JSON.parse(JSON.stringify(activeSheet)) as SheetData;
-    cloned.name = `${activeSheet.name} Copy`;
-    const nextSheets = [...safeSheets, cloned];
+    if (!readOnly) collectCurrentSheetFromHot(true);
+    const idx = activeSheetIndexRef.current;
+    const source = workbookRef.current.sheets[idx];
+    if (!source) return;
+    const cloned = JSON.parse(JSON.stringify(source)) as SheetData;
+    cloned.name = `${source.name} Copy`;
+    const nextSheets = [...workbookRef.current.sheets, cloned];
     workbookRef.current.sheets = nextSheets;
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
@@ -1442,9 +1491,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   };
 
   const moveSheet = (direction: "left" | "right") => {
+    if (!readOnly) collectCurrentSheetFromHot(true);
+    const sheets = workbookRef.current.sheets;
     const target = activeSheetIndex + (direction === "left" ? -1 : 1);
-    if (target < 0 || target >= safeSheets.length) return;
-    const next = [...safeSheets];
+    if (target < 0 || target >= sheets.length) return;
+    const next = [...sheets];
     const [moved] = next.splice(activeSheetIndex, 1);
     next.splice(target, 0, moved);
     workbookRef.current.sheets = next;
@@ -1475,7 +1526,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     const nextSheetCount = nextSheets.length;
     const sheetCountChanged = prevSheetCount !== nextSheetCount;
 
-    workbookRef.current = { sheets: nextSheets };
+    workbookRef.current = { sheets: nextSheets.map(deepCloneSheet) };
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1487,7 +1538,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       setActiveSheetIndex(0);
       const first = nextSheets[0]?.grid?.length ? nextSheets[0].grid : [[""]];
       if (!readOnly) {
-        setInitialGrid(first);
+        setInitialGrid(cloneEditableGrid(first));
       } else {
         const rows = Math.min(MAX_PREVIEW_ROWS, first.length);
         const cols = Math.min(MAX_PREVIEW_COLS, first[0]?.length || 0);
@@ -2052,28 +2103,30 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         )}
       </div>
 
-      {/* ── Sheet tabs ── */}
-      <div className="relative z-10 flex flex-wrap items-center gap-2">
-        {sheetTabs.map((sheet, index) => (
-          <Button
-            key={`${sheet.name}-${index}`}
-            type="button"
-            variant={index === activeSheetIndex ? "default" : "outline"}
-            size="sm"
-            style={
-              sheet.tabColor
-                ? { backgroundColor: sheet.tabColor, color: "#111827" }
-                : undefined
-            }
-            onMouseDown={noFocusSteal}
-            onClick={() => handleSheetSwitch(index)}
-          >
-            {sheet.name}
-          </Button>
-        ))}
+      {/* ── Sheet tabs + sheet actions (separate rows) ── */}
+      <div className="relative z-10 space-y-2">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+          {sheetTabs.map((sheet, index) => (
+            <Button
+              key={`${sheet.name}-${index}`}
+              type="button"
+              variant={index === activeSheetIndex ? "default" : "outline"}
+              size="sm"
+              style={
+                sheet.tabColor
+                  ? { backgroundColor: sheet.tabColor, color: "#111827" }
+                  : undefined
+              }
+              onMouseDown={noFocusSteal}
+              onClick={() => handleSheetSwitch(index)}
+            >
+              {sheet.name}
+            </Button>
+          ))}
+        </div>
 
         {!readOnly && (
-          <>
+          <div className="flex flex-wrap items-center gap-2">
             {renaming ? (
               <div className="flex items-center gap-1">
                 <input
@@ -2226,13 +2279,17 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
               className="w-12 h-8 px-2 text-sm border rounded"
               title="Freeze columns"
             />
-          </>
+          </div>
         )}
       </div>
 
       {/* ── Grid ── */}
       <div className="relative z-0 overflow-hidden border rounded-md">
         <HotTable
+          /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
+           * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
+           * leak onto another at the same coordinates. */
+          key={`ht-wb-${activeSheetIndex}-${incomingWorkbookKey}`}
           ref={hotRef}
           data={initialGrid}
           themeName="ht-theme-main"
@@ -2242,7 +2299,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           readOnly={false}
           trimWhitespace={false}
           width="100%"
-          stretchH={readOnly ? "all" : "none"}
+          stretchH={stretchColumnsInPreview ? "all" : "none"}
           height={readOnly ? 380 : 320}
           formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
           mergeCells={
@@ -2420,6 +2477,6 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       )}
     </div>
   );
-};
+});
 
 export default HandsontableWorkbook;

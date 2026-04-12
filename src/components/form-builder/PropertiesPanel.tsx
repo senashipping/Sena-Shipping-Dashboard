@@ -18,7 +18,9 @@ import { FormField, FormSection, TableConfig, TableColumn } from "../../types";
 import { useToast } from "../ui/toast";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
-import HandsontableWorkbook from "./HandsontableWorkbook";
+import HandsontableWorkbook, {
+  type HandsontableWorkbookRef,
+} from "./HandsontableWorkbook";
 
 interface PropertiesPanelProps {
   selectedItem: {
@@ -42,6 +44,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const [isImportingTemplate, setIsImportingTemplate] = React.useState(false);
   const [isWorkbookEditorOpen, setIsWorkbookEditorOpen] = React.useState(false);
   const [workbookDraft, setWorkbookDraft] = React.useState<any | null>(null);
+  const workbookEditorRef = React.useRef<HandsontableWorkbookRef>(null);
   const importTemplateInputRef = React.useRef<HTMLInputElement | null>(null);
   React.useEffect(() => {
     setIsWorkbookEditorOpen(false);
@@ -566,12 +569,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <DialogHeader>
               <DialogTitle>Edit Workbook</DialogTitle>
               <DialogDescription>
-                Edit workbook content here, then click Save Changes to apply it to this field.
+                Save Changes copies the live grid from the editor (cells, column widths, merges)
+                into the form field. The toolbar Save Workbook button is optional.
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-[65vh] overflow-auto">
               {workbookDraft?.sheets?.length ? (
                 <HandsontableWorkbook
+                  ref={workbookEditorRef}
                   data={workbookDraft}
                   onChange={(next) => setWorkbookDraft(next)}
                   readOnly={false}
@@ -598,7 +603,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 disabled={!workbookDraft?.sheets?.length}
                 onClick={() => {
                   if (!workbookDraft?.sheets?.length) return;
-                  onUpdate({ excelTemplate: workbookDraft });
+                  const snap = workbookEditorRef.current?.getWorkbookSnapshot();
+                  const template = snap?.sheets?.length
+                    ? { sheets: snap.sheets }
+                    : workbookDraft;
+                  if (!template?.sheets?.length) return;
+                  onUpdate({ excelTemplate: template });
                   setIsWorkbookEditorOpen(false);
                   setWorkbookDraft(null);
                   toast({
