@@ -167,6 +167,47 @@ const workbookSignature = (sheets: SheetData[]) =>
     )
     .join("::");
 
+/** Deep snapshot so each sheet index has no shared nested refs with others or the parent. */
+const deepCloneSheet = (s: SheetData): SheetData => ({
+  name: s.name,
+  tabColor: s.tabColor,
+  grid: (s.grid?.length ? s.grid : [[""]]).map((row) =>
+    Array.isArray(row) ? row.map((c) => (c == null ? "" : String(c))) : [""],
+  ),
+  mergeCells: (s.mergeCells || []).map((m) => ({
+    row: m.row,
+    col: m.col,
+    rowspan: m.rowspan,
+    colspan: m.colspan,
+  })),
+  cellMeta: (s.cellMeta || []).map((m) => ({
+    row: m.row,
+    col: m.col,
+    className: m.className,
+    type: m.type,
+    dateFormat: m.dateFormat,
+    correctFormat: m.correctFormat,
+    numericFormat:
+      m.numericFormat && typeof m.numericFormat === "object"
+        ? {
+            pattern: m.numericFormat.pattern,
+            culture: m.numericFormat.culture,
+          }
+        : undefined,
+    source: Array.isArray(m.source) ? m.source.map(String) : undefined,
+    strict: m.strict,
+  })),
+  images: (s.images || []).map((img) => ({
+    row: img.row,
+    col: img.col,
+    rowspan: img.rowspan,
+    colspan: img.colspan,
+    dataUrl: img.dataUrl,
+  })),
+  colWidthsPx: s.colWidthsPx?.length ? [...s.colWidthsPx] : undefined,
+  rowHeightsPx: s.rowHeightsPx?.length ? [...s.rowHeightsPx] : undefined,
+});
+
 const toColumnLabel = (index: number) => {
   let n = index + 1;
   let out = "";
@@ -211,7 +252,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
   const [activeSheetIndex, setActiveSheetIndex] = React.useState(0);
   const activeSheetIndexRef = React.useRef(0);
-  React.useEffect(() => {
+  /** Must run before paint so ref never lags `activeSheetIndex` (prevents saving the visible grid to the wrong sheet on fast tab switches). */
+  React.useLayoutEffect(() => {
     activeSheetIndexRef.current = activeSheetIndex;
   }, [activeSheetIndex]);
 
@@ -519,11 +561,11 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   // ─── sheet sync ────────────────────────────────────────────────────────────
 
   const collectCurrentSheetFromHot = React.useCallback(
-    (includeMeta: boolean) => {
+    (includeMeta: boolean, sheetIndex?: number) => {
       const hot = hotRef.current?.hotInstance;
       if (!hot) return;
 
-      const idx = activeSheetIndexRef.current;
+      const idx = sheetIndex ?? activeSheetIndexRef.current;
 
       const nextGrid = (hot.getData?.() || []).map((row: any[]) =>
         row.map((cell) => (cell == null ? "" : String(cell))),
@@ -638,17 +680,23 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
         );
       }
 
-      workbookRef.current.sheets[idx] = {
+      workbookRef.current.sheets[idx] = deepCloneSheet({
         ...current,
         grid: nextGrid,
         mergeCells,
         cellMeta,
         colWidthsPx,
         rowHeightsPx,
-      };
+      });
     },
     [],
   );
+
+  const emitWorkbookToParent = React.useCallback(() => {
+    onChange({
+      sheets: workbookRef.current.sheets.map(deepCloneSheet),
+    });
+  }, [onChange]);
 
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
@@ -729,8 +777,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   );
 
   const handleSheetSwitch = (targetIndex: number) => {
-    if (targetIndex === activeSheetIndexRef.current) return;
-    if (!readOnly) collectCurrentSheetFromHot(true);
+    if (targetIndex === activeSheetIndex) return;
+    if (!readOnly) collectCurrentSheetFromHot(true, activeSheetIndex);
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
     setInitialGrid(toVisibleGrid(workbookRef.current.sheets[targetIndex]));
@@ -957,7 +1005,8 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
     applyClassToSelection("meta-fillable", false);
 
-    const sheet = workbookRef.current.sheets[activeSheetIndexRef.current];
+    const idx = activeSheetIndexRef.current;
+    const sheet = workbookRef.current.sheets[idx];
     if (!sheet) return;
 
     const metaByKey = new Map<
@@ -986,7 +1035,10 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     }
 
     sheet.cellMeta = Array.from(metaByKey.values());
-    onChange({ sheets: [...workbookRef.current.sheets] });
+    workbookRef.current.sheets[idx] = deepCloneSheet(
+      workbookRef.current.sheets[idx]!,
+    );
+    emitWorkbookToParent();
     if (hot && range) {
       hot.selectCell(
         range.startRow,
@@ -1179,19 +1231,15 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
   const emitWorkbookSnapshot = () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
-    onChange({
-      sheets: workbookRef.current.sheets.map((s) => ({ ...s })),
-    });
+    emitWorkbookToParent();
   };
 
   /** Persist column/row sizes to template and parent (e.g. before "Save Changes" without toolbar Save). */
   const flushLayoutToParent = React.useCallback(() => {
     if (readOnly) return;
     collectCurrentSheetFromHot(true);
-    onChange({
-      sheets: workbookRef.current.sheets.map((s) => ({ ...s })),
-    });
-  }, [readOnly, collectCurrentSheetFromHot, onChange]);
+    emitWorkbookToParent();
+  }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
 
   const exportXlsx = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -2024,6 +2072,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       {/* ── Grid ── */}
       <div className="relative z-0 overflow-hidden border rounded-md">
         <HotTable
+          key={`sheet-${activeSheetIndex}`}
           ref={hotRef}
           data={initialGrid}
           themeName="ht-theme-main"
@@ -2094,7 +2143,29 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           afterGetCellMeta={afterGetCellMeta}
           afterColumnResize={() => flushLayoutToParent()}
           afterRowResize={() => flushLayoutToParent()}
-          afterChange={() => refreshUndoRedoState()}
+          afterChange={(changes, source) => {
+            refreshUndoRedoState();
+            if (readOnly && changes && source !== "loadData") {
+              const idx = activeSheetIndexRef.current;
+              const sheet = workbookRef.current.sheets[idx];
+              if (!sheet) return;
+              const newGrid = sheet.grid.map((row) => [...row]);
+              for (const [row, col, , newValue] of changes as [number, number, unknown, unknown][]) {
+                if (
+                  typeof row === "number" &&
+                  typeof col === "number" &&
+                  newGrid[row]
+                ) {
+                  newGrid[row][col] = newValue == null ? "" : String(newValue);
+                }
+              }
+              workbookRef.current.sheets[idx] = deepCloneSheet({
+                ...sheet,
+                grid: newGrid,
+              });
+              emitWorkbookToParent();
+            }
+          }}
           afterSelection={(r, c, r2, c2) => {
             if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0)
               return;
