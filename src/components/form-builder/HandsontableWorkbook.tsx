@@ -48,8 +48,9 @@ interface HandsontableWorkbookProps {
   readOnly?: boolean;
 }
 
-const MAX_PREVIEW_ROWS = 220;
-const MAX_PREVIEW_COLS = 80;
+/** Capped grid for read-only / form preview so imports with huge dimensions stay responsive. */
+export const MAX_PREVIEW_ROWS = 220;
+export const MAX_PREVIEW_COLS = 80;
 const FORMULAS_CONFIG = { engine: HyperFormula };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -87,50 +88,54 @@ const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
             colspan: +m.colspan,
           }))
       : [],
-    cellMeta: Array.isArray(sheet?.cellMeta)
-      ? sheet.cellMeta
-          .filter(
-            (m: any) => m && Number.isFinite(+m.row) && Number.isFinite(+m.col),
+    cellMeta: dedupeCellMetaByCoordinate(
+      Array.isArray(sheet?.cellMeta)
+        ? sheet.cellMeta
+            .filter(
+              (m: any) => m && Number.isFinite(+m.row) && Number.isFinite(+m.col),
+            )
+            .map((m: any) => ({
+              row: +m.row,
+              col: +m.col,
+              className:
+                typeof m.className === "string" ? m.className : undefined,
+              type: typeof m.type === "string" ? m.type : undefined,
+              dateFormat:
+                typeof m.dateFormat === "string" ? m.dateFormat : undefined,
+              correctFormat:
+                typeof m.correctFormat === "boolean"
+                  ? m.correctFormat
+                  : undefined,
+              numericFormat:
+                m.numericFormat && typeof m.numericFormat === "object"
+                  ? {
+                      pattern:
+                        typeof m.numericFormat.pattern === "string"
+                          ? m.numericFormat.pattern
+                          : undefined,
+                      culture:
+                        typeof m.numericFormat.culture === "string"
+                          ? m.numericFormat.culture
+                          : undefined,
+                    }
+                  : undefined,
+              source: Array.isArray(m.source) ? m.source.map(String) : undefined,
+              strict: typeof m.strict === "boolean" ? m.strict : undefined,
+            }))
+        : [],
+    ),
+    images: dedupeImagesByAnchor(
+      Array.isArray((sheet as any)?.images)
+        ? (sheet as any).images.filter(
+            (img: any) =>
+              img &&
+              Number.isFinite(+img.row) &&
+              Number.isFinite(+img.col) &&
+              typeof img.dataUrl === "string" &&
+              img.dataUrl.length > 0,
           )
-          .map((m: any) => ({
-            row: +m.row,
-            col: +m.col,
-            className:
-              typeof m.className === "string" ? m.className : undefined,
-            type: typeof m.type === "string" ? m.type : undefined,
-            dateFormat:
-              typeof m.dateFormat === "string" ? m.dateFormat : undefined,
-            correctFormat:
-              typeof m.correctFormat === "boolean"
-                ? m.correctFormat
-                : undefined,
-            numericFormat:
-              m.numericFormat && typeof m.numericFormat === "object"
-                ? {
-                    pattern:
-                      typeof m.numericFormat.pattern === "string"
-                        ? m.numericFormat.pattern
-                        : undefined,
-                    culture:
-                      typeof m.numericFormat.culture === "string"
-                        ? m.numericFormat.culture
-                        : undefined,
-                  }
-                : undefined,
-            source: Array.isArray(m.source) ? m.source.map(String) : undefined,
-            strict: typeof m.strict === "boolean" ? m.strict : undefined,
-          }))
-      : [],
-    images: Array.isArray((sheet as any)?.images)
-      ? (sheet as any).images.filter(
-          (img: any) =>
-            img &&
-            Number.isFinite(+img.row) &&
-            Number.isFinite(+img.col) &&
-            typeof img.dataUrl === "string" &&
-            img.dataUrl.length > 0,
-        )
-      : [],
+        : [],
+    ),
     colWidthsPx: Array.isArray(sheet?.colWidthsPx)
       ? sheet.colWidthsPx
       : undefined,
@@ -180,33 +185,149 @@ const deepCloneSheet = (s: SheetData): SheetData => ({
     rowspan: m.rowspan,
     colspan: m.colspan,
   })),
-  cellMeta: (s.cellMeta || []).map((m) => ({
-    row: m.row,
-    col: m.col,
-    className: m.className,
-    type: m.type,
-    dateFormat: m.dateFormat,
-    correctFormat: m.correctFormat,
-    numericFormat:
-      m.numericFormat && typeof m.numericFormat === "object"
-        ? {
-            pattern: m.numericFormat.pattern,
-            culture: m.numericFormat.culture,
-          }
-        : undefined,
-    source: Array.isArray(m.source) ? m.source.map(String) : undefined,
-    strict: m.strict,
-  })),
-  images: (s.images || []).map((img) => ({
-    row: img.row,
-    col: img.col,
-    rowspan: img.rowspan,
-    colspan: img.colspan,
-    dataUrl: img.dataUrl,
-  })),
+  cellMeta: dedupeCellMetaByCoordinate(
+    (s.cellMeta || []).map((m) => ({
+      row: m.row,
+      col: m.col,
+      className: m.className,
+      type: m.type,
+      dateFormat: m.dateFormat,
+      correctFormat: m.correctFormat,
+      numericFormat:
+        m.numericFormat && typeof m.numericFormat === "object"
+          ? {
+              pattern: m.numericFormat.pattern,
+              culture: m.numericFormat.culture,
+            }
+          : undefined,
+      source: Array.isArray(m.source) ? m.source.map(String) : undefined,
+      strict: m.strict,
+    })),
+  ),
+  images: dedupeImagesByAnchor(
+    (s.images || []).map((img) => ({
+      row: img.row,
+      col: img.col,
+      rowspan: img.rowspan,
+      colspan: img.colspan,
+      dataUrl: img.dataUrl,
+    })),
+  ),
   colWidthsPx: s.colWidthsPx?.length ? [...s.colWidthsPx] : undefined,
   rowHeightsPx: s.rowHeightsPx?.length ? [...s.rowHeightsPx] : undefined,
 });
+
+type CellMetaEntry = NonNullable<SheetData["cellMeta"]>[number];
+
+/** Stable 0-based cell index used everywhere we key cells (one logical cell = one bucket). */
+const cellCoordKey = (row: number, col: number) => `${row}:${col}`;
+
+const mergeClassNameStrings = (a?: string, b?: string) => {
+  const tokens = new Set<string>();
+  for (const t of String(a || "")
+    .split(/\s+/)
+    .filter(Boolean))
+    tokens.add(t);
+  for (const t of String(b || "")
+    .split(/\s+/)
+    .filter(Boolean))
+    tokens.add(t);
+  const out = [...tokens].join(" ").trim();
+  return out || undefined;
+};
+
+/**
+ * Handsontable / imports can produce multiple meta rows for the same (row,col).
+ * Collapse to exactly one record per coordinate so cells cannot "fight" each other.
+ */
+const dedupeCellMetaByCoordinate = (
+  list: NonNullable<SheetData["cellMeta"]>,
+): NonNullable<SheetData["cellMeta"]> => {
+  const map = new Map<string, CellMetaEntry>();
+  for (const raw of list) {
+    if (!raw || !Number.isFinite(+raw.row) || !Number.isFinite(+raw.col))
+      continue;
+    const row = +raw.row;
+    const col = +raw.col;
+    const key = cellCoordKey(row, col);
+    const next: CellMetaEntry = {
+      row,
+      col,
+      className: raw.className ? String(raw.className) : undefined,
+      type: typeof raw.type === "string" ? raw.type : undefined,
+      dateFormat:
+        typeof raw.dateFormat === "string" ? raw.dateFormat : undefined,
+      correctFormat:
+        typeof raw.correctFormat === "boolean" ? raw.correctFormat : undefined,
+      numericFormat:
+        raw.numericFormat && typeof raw.numericFormat === "object"
+          ? {
+              pattern:
+                typeof raw.numericFormat.pattern === "string"
+                  ? raw.numericFormat.pattern
+                  : undefined,
+              culture:
+                typeof raw.numericFormat.culture === "string"
+                  ? raw.numericFormat.culture
+                  : undefined,
+            }
+          : undefined,
+      source: Array.isArray(raw.source) ? raw.source.map(String) : undefined,
+      strict: typeof raw.strict === "boolean" ? raw.strict : undefined,
+    };
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, next);
+      continue;
+    }
+    map.set(key, {
+      row,
+      col,
+      className: mergeClassNameStrings(prev.className, next.className),
+      type: next.type ?? prev.type,
+      dateFormat: next.dateFormat ?? prev.dateFormat,
+      correctFormat:
+        typeof next.correctFormat === "boolean"
+          ? next.correctFormat
+          : prev.correctFormat,
+      numericFormat: next.numericFormat ?? prev.numericFormat,
+      source: next.source ?? prev.source,
+      strict:
+        typeof next.strict === "boolean" ? next.strict : prev.strict,
+    });
+  }
+  return [...map.values()].sort((a, b) =>
+    a.row !== b.row ? a.row - b.row : a.col - b.col,
+  );
+};
+
+/** One image anchor per top-left cell (avoids duplicate overlays on same cell). */
+const dedupeImagesByAnchor = (
+  images: NonNullable<SheetData["images"]>,
+): NonNullable<SheetData["images"]> => {
+  const map = new Map<string, (typeof images)[number]>();
+  for (const img of images) {
+    if (
+      !img ||
+      !Number.isFinite(+img.row) ||
+      !Number.isFinite(+img.col) ||
+      typeof img.dataUrl !== "string"
+    )
+      continue;
+    const row = +img.row;
+    const col = +img.col;
+    const key = cellCoordKey(row, col);
+    if (!map.has(key))
+      map.set(key, {
+        row,
+        col,
+        rowspan: img.rowspan,
+        colspan: img.colspan,
+        dataUrl: img.dataUrl,
+      });
+  }
+  return [...map.values()];
+};
 
 const toColumnLabel = (index: number) => {
   let n = index + 1;
@@ -382,7 +503,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
     >();
     for (const img of (activeSheet as any)?.images || []) {
       if (!img?.dataUrl) continue;
-      map.set(`${img.row}:${img.col}`, {
+      map.set(cellCoordKey(+img.row, +img.col), {
         dataUrl: img.dataUrl,
         rowspan: Math.max(1, +img.rowspan || 1),
         colspan: Math.max(1, +img.colspan || 1),
@@ -394,7 +515,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
   const persistedCellMetaMap = React.useMemo(() => {
     const map = new Map<string, NonNullable<SheetData["cellMeta"]>[number]>();
     for (const meta of activeSheet?.cellMeta || [])
-      map.set(`${meta.row}:${meta.col}`, meta);
+      map.set(cellCoordKey(+meta.row, +meta.col), meta);
     return map;
   }, [activeSheet]);
 
@@ -634,7 +755,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
             });
           }
         }
-        cellMeta = nextMeta;
+        cellMeta = dedupeCellMetaByCoordinate(nextMeta);
       }
 
       const current = workbookRef.current.sheets[idx] || {
@@ -721,7 +842,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
       if (!readOnly) {
-        for (const meta of sheet.cellMeta || []) {
+        for (const meta of dedupeCellMetaByCoordinate(sheet.cellMeta || [])) {
           if (meta.className)
             hot.setCellMeta(meta.row, meta.col, "className", meta.className);
           if (meta.type) hot.setCellMeta(meta.row, meta.col, "type", meta.type);
@@ -1366,7 +1487,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
 
   const cellsCallback = React.useCallback(
     (row: number, col: number) => {
-      const persistedMeta = persistedCellMetaMap.get(`${row}:${col}`);
+      const persistedMeta = persistedCellMetaMap.get(cellCoordKey(row, col));
       const cp: any = {};
       const persistedClassName = String(persistedMeta?.className || "");
       const classTokens = persistedClassName.split(" ").filter(Boolean);
@@ -1384,7 +1505,7 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
       if (typeof persistedMeta?.strict === "boolean")
         cp.strict = persistedMeta.strict;
 
-      const image = imageMap.get(`${row}:${col}`);
+      const image = imageMap.get(cellCoordKey(row, col));
       if (image || !readOnly) {
         cp.renderer = (
           instance: any,
@@ -2091,8 +2212,12 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
           filters={!readOnly}
           dropdownMenu={!readOnly}
           columnSorting={!readOnly}
-          hiddenRows={{ indicators: true }}
-          hiddenColumns={{ indicators: true }}
+          {...(!readOnly
+            ? {
+                hiddenRows: { indicators: true } as const,
+                hiddenColumns: { indicators: true } as const,
+              }
+            : {})}
           multiColumnSorting={!readOnly}
           manualColumnFreeze={!readOnly}
           autoColumnSize={false}
@@ -2149,21 +2274,36 @@ const HandsontableWorkbook: React.FC<HandsontableWorkbookProps> = ({
               const idx = activeSheetIndexRef.current;
               const sheet = workbookRef.current.sheets[idx];
               if (!sheet) return;
-              const newGrid = sheet.grid.map((row) => [...row]);
-              for (const [row, col, , newValue] of changes as [number, number, unknown, unknown][]) {
+              const baseGrid = sheet.grid;
+              let newGrid: string[][] = baseGrid;
+              for (const [row, col, , newValue] of changes as [
+                number,
+                number,
+                unknown,
+                unknown,
+              ][]) {
                 if (
-                  typeof row === "number" &&
-                  typeof col === "number" &&
-                  newGrid[row]
-                ) {
-                  newGrid[row][col] = newValue == null ? "" : String(newValue);
+                  typeof row !== "number" ||
+                  typeof col !== "number" ||
+                  !baseGrid[row]
+                )
+                  continue;
+                if (newGrid === baseGrid) {
+                  newGrid = baseGrid.map((r, ri) =>
+                    ri === row ? [...r] : r,
+                  ) as string[][];
+                } else if (newGrid[row] === baseGrid[row]) {
+                  newGrid[row] = [...baseGrid[row]];
                 }
+                newGrid[row][col] = newValue == null ? "" : String(newValue);
               }
-              workbookRef.current.sheets[idx] = deepCloneSheet({
-                ...sheet,
-                grid: newGrid,
-              });
-              emitWorkbookToParent();
+              if (newGrid !== baseGrid) {
+                workbookRef.current.sheets[idx] = {
+                  ...sheet,
+                  grid: newGrid,
+                };
+                emitWorkbookToParent();
+              }
             }
           }}
           afterSelection={(r, c, r2, c2) => {
