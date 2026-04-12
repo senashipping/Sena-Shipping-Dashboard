@@ -99,11 +99,7 @@ const clipMergeCellsToGrid = (
     const c0 = +m.col;
     const rs = +m.rowspan;
     const cs = +m.colspan;
-    if (
-      ![r0, c0, rs, cs].every((n) => Number.isFinite(n)) ||
-      rs < 1 ||
-      cs < 1
-    )
+    if (![r0, c0, rs, cs].every((n) => Number.isFinite(n)) || rs < 1 || cs < 1)
       continue;
     const r1 = r0 + rs - 1;
     const c1 = c0 + cs - 1;
@@ -200,7 +196,9 @@ const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
                             : undefined,
                       }
                     : undefined,
-                source: Array.isArray(m.source) ? m.source.map(String) : undefined,
+                source: Array.isArray(m.source)
+                  ? m.source.map(String)
+                  : undefined,
                 strict: typeof m.strict === "boolean" ? m.strict : undefined,
               }))
           : [],
@@ -329,45 +327,6 @@ const classNameHasFillable = (className?: string) =>
     .filter(Boolean)
     .includes("meta-fillable");
 
-/**
- * Runtime preview: treat a cell as fillable if persisted `cellMeta` marks that coordinate, or
- * the cell lies inside a merged region where any covered coordinate is marked fillable.
- * (Mark Fillable often tags the whole range; HOT merge + `afterGetCellMeta` must still agree.)
- */
-const isPreviewFillableAt = (
-  row: number,
-  col: number,
-  metaMap: Map<string, CellMetaEntry>,
-  merges: SheetData["mergeCells"],
-): boolean => {
-  if (classNameHasFillable(metaMap.get(cellCoordKey(row, col))?.className))
-    return true;
-  if (!merges?.length) return false;
-  for (const m of merges) {
-    if (
-      !m ||
-      !Number.isFinite(+m.row) ||
-      !Number.isFinite(+m.col) ||
-      !Number.isFinite(+m.rowspan) ||
-      !Number.isFinite(+m.colspan)
-    )
-      continue;
-    const r0 = +m.row;
-    const c0 = +m.col;
-    const r1 = r0 + +m.rowspan - 1;
-    const c1 = c0 + +m.colspan - 1;
-    if (row < r0 || row > r1 || col < c0 || col > c1) continue;
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
-        if (classNameHasFillable(metaMap.get(cellCoordKey(r, c))?.className))
-          return true;
-      }
-    }
-    return false;
-  }
-  return false;
-};
-
 const mergeClassNameStrings = (a?: string, b?: string) => {
   const tokens = new Set<string>();
   for (const t of String(a || "")
@@ -438,13 +397,60 @@ const dedupeCellMetaByCoordinate = (
           : prev.correctFormat,
       numericFormat: next.numericFormat ?? prev.numericFormat,
       source: next.source ?? prev.source,
-      strict:
-        typeof next.strict === "boolean" ? next.strict : prev.strict,
+      strict: typeof next.strict === "boolean" ? next.strict : prev.strict,
     });
   }
   return [...map.values()].sort((a, b) =>
     a.row !== b.row ? a.row - b.row : a.col - b.col,
   );
+};
+
+/**
+ * When the parent echoes `data` without `meta-fillable` (e.g. save/API round-trip), keep
+ * fillable marks that still exist on the previous in-memory workbook.
+ */
+const mergeFillableMetaFromPrevSheet = (
+  prev: SheetData | undefined,
+  incoming: SheetData,
+): SheetData => {
+  const out = deepCloneSheet(incoming);
+  if (!prev?.cellMeta?.length) return out;
+
+  const prevFillKeys = new Set<string>();
+  for (const m of prev.cellMeta) {
+    if (!classNameHasFillable(m.className)) continue;
+    if (!Number.isFinite(+m.row) || !Number.isFinite(+m.col)) continue;
+    prevFillKeys.add(cellCoordKey(+m.row, +m.col));
+  }
+  if (prevFillKeys.size === 0) return out;
+
+  const metaByKey = new Map<string, CellMetaEntry>();
+  for (const m of out.cellMeta || []) {
+    if (!Number.isFinite(+m.row) || !Number.isFinite(+m.col)) continue;
+    metaByKey.set(cellCoordKey(+m.row, +m.col), {
+      ...m,
+      row: +m.row,
+      col: +m.col,
+    });
+  }
+
+  for (const key of prevFillKeys) {
+    const cur = metaByKey.get(key);
+    const cn = cur ? String(cur.className || "") : "";
+    if (classNameHasFillable(cn)) continue;
+    const [rs, cs] = key.split(":").map(Number);
+    const tokens = new Set(cn.split(/\s+/).filter(Boolean));
+    tokens.add("meta-fillable");
+    metaByKey.set(key, {
+      ...(cur || { row: rs, col: cs }),
+      row: rs,
+      col: cs,
+      className: [...tokens].join(" ").trim() || undefined,
+    });
+  }
+
+  out.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
+  return out;
 };
 
 /** One image anchor per top-left cell (avoids duplicate overlays on same cell). */
@@ -508,10 +514,7 @@ const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 const HandsontableWorkbook = React.forwardRef<
   HandsontableWorkbookRef,
   HandsontableWorkbookProps
->(function HandsontableWorkbook(
-  { data, onChange, readOnly = false },
-  ref,
-) {
+>(function HandsontableWorkbook({ data, onChange, readOnly = false }, ref) {
   const workbookRef = React.useRef<{ sheets: SheetData[] }>({
     sheets: normalizeSheets(data).map(deepCloneSheet),
   });
@@ -590,11 +593,16 @@ const HandsontableWorkbook = React.forwardRef<
 
   const hotRef = React.useRef<any>(null);
 
-  const textColorApplyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const fillColorApplyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
-    null,
+  const textColorApplyTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const fillColorApplyTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+
+  const normalizedIncomingSheets = React.useMemo(
+    () => normalizeSheets(data),
+    [data],
   );
 
   const safeSheets = workbookRef.current.sheets;
@@ -685,89 +693,126 @@ const HandsontableWorkbook = React.forwardRef<
     return map;
   }, [activeSheet]);
 
+  const fillableCellSet = React.useMemo(() => {
+    const set = new Set<string>();
+    if (!readOnly) return set;
+    for (const [key, meta] of persistedCellMetaMap) {
+      if (classNameHasFillable(meta.className)) set.add(key);
+    }
+    for (const m of renderedMergeCells) {
+      if (!m) continue;
+      let mergeHasFillable = false;
+      for (
+        let r = m.row;
+        r <= m.row + m.rowspan - 1 && !mergeHasFillable;
+        r++
+      ) {
+        for (
+          let c = m.col;
+          c <= m.col + m.colspan - 1 && !mergeHasFillable;
+          c++
+        ) {
+          const meta = persistedCellMetaMap.get(cellCoordKey(r, c));
+          if (meta && classNameHasFillable(meta.className))
+            mergeHasFillable = true;
+        }
+      }
+      if (mergeHasFillable) {
+        for (let r = m.row; r <= m.row + m.rowspan - 1; r++) {
+          for (let c = m.col; c <= m.col + m.colspan - 1; c++) {
+            set.add(cellCoordKey(r, c));
+          }
+        }
+      }
+    }
+    return set;
+  }, [readOnly, persistedCellMetaMap, renderedMergeCells]);
+
   // ─── selection helpers ──────────────────────────────────────────────────────
 
   /**
    * Snapshot selection from HOT at action time (getSelectedRangeLast first).
    * Use this in toolbar handlers instead of reading selection after focus moved.
    */
-  const getToolbarActionRange = React.useCallback((hot: any) => {
-    if (!hot) return null;
-    const idx = activeSheetIndexRef.current;
-    const sheet = workbookRef.current.sheets[idx];
-    const rowCount = Math.max(1, sheet?.grid?.length || 1);
-    const colCount = Math.max(1, sheet?.grid?.[0]?.length || 1);
+  const getToolbarActionRange = React.useCallback(
+    (hot: any) => {
+      if (!hot) return null;
+      const idx = activeSheetIndexRef.current;
+      const sheet = workbookRef.current.sheets[idx];
+      const rowCount = Math.max(1, sheet?.grid?.length || 1);
+      const colCount = Math.max(1, sheet?.grid?.[0]?.length || 1);
 
-    const clamp = (range: {
-      startRow: number;
-      endRow: number;
-      startCol: number;
-      endCol: number;
-    }) => ({
-      startRow: Math.max(
-        0,
-        Math.min(rowCount - 1, Math.min(range.startRow, range.endRow)),
-      ),
-      endRow: Math.max(
-        0,
-        Math.min(rowCount - 1, Math.max(range.startRow, range.endRow)),
-      ),
-      startCol: Math.max(
-        0,
-        Math.min(colCount - 1, Math.min(range.startCol, range.endCol)),
-      ),
-      endCol: Math.max(
-        0,
-        Math.min(colCount - 1, Math.max(range.startCol, range.endCol)),
-      ),
-    });
-
-    if (formatAllCells) {
-      return clamp({
-        startRow: 0,
-        endRow: rowCount - 1,
-        startCol: 0,
-        endCol: colCount - 1,
+      const clamp = (range: {
+        startRow: number;
+        endRow: number;
+        startCol: number;
+        endCol: number;
+      }) => ({
+        startRow: Math.max(
+          0,
+          Math.min(rowCount - 1, Math.min(range.startRow, range.endRow)),
+        ),
+        endRow: Math.max(
+          0,
+          Math.min(rowCount - 1, Math.max(range.startRow, range.endRow)),
+        ),
+        startCol: Math.max(
+          0,
+          Math.min(colCount - 1, Math.min(range.startCol, range.endCol)),
+        ),
+        endCol: Math.max(
+          0,
+          Math.min(colCount - 1, Math.max(range.startCol, range.endCol)),
+        ),
       });
-    }
 
-    const sel =
-      typeof hot.getSelectedRangeLast === "function"
-        ? hot.getSelectedRangeLast()
-        : null;
-    if (sel?.from != null && sel?.to != null) {
-      const r = clamp({
-        startRow: sel.from.row,
-        endRow: sel.to.row,
-        startCol: sel.from.col,
-        endCol: sel.to.col,
-      });
-      lastSelectionRef.current = r;
-      sheetSelectionRef.current[idx] = r;
-      return r;
-    }
+      if (formatAllCells) {
+        return clamp({
+          startRow: 0,
+          endRow: rowCount - 1,
+          startCol: 0,
+          endCol: colCount - 1,
+        });
+      }
 
-    const last = hot.getSelectedLast?.();
-    if (
-      last &&
-      last.length >= 4 &&
-      last.every((v: any) => Number.isInteger(v))
-    ) {
-      const r = clamp({
-        startRow: last[0],
-        endRow: last[2],
-        startCol: last[1],
-        endCol: last[3],
-      });
-      lastSelectionRef.current = r;
-      sheetSelectionRef.current[idx] = r;
-      return r;
-    }
+      const sel =
+        typeof hot.getSelectedRangeLast === "function"
+          ? hot.getSelectedRangeLast()
+          : null;
+      if (sel?.from != null && sel?.to != null) {
+        const r = clamp({
+          startRow: sel.from.row,
+          endRow: sel.to.row,
+          startCol: sel.from.col,
+          endCol: sel.to.col,
+        });
+        lastSelectionRef.current = r;
+        sheetSelectionRef.current[idx] = r;
+        return r;
+      }
 
-    const cached =
-      sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
-    return clamp(cached);
-  }, [formatAllCells]);
+      const last = hot.getSelectedLast?.();
+      if (
+        last &&
+        last.length >= 4 &&
+        last.every((v: any) => Number.isInteger(v))
+      ) {
+        const r = clamp({
+          startRow: last[0],
+          endRow: last[2],
+          startCol: last[1],
+          endCol: last[3],
+        });
+        lastSelectionRef.current = r;
+        sheetSelectionRef.current[idx] = r;
+        return r;
+      }
+
+      const cached = sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
+      return clamp(cached);
+    },
+    [formatAllCells],
+  );
 
   const restoreHotRange = (
     hot: any,
@@ -868,16 +913,20 @@ const HandsontableWorkbook = React.forwardRef<
             colspan: cell.colspan,
           })) || [];
 
-      let cellMeta =
-        workbookRef.current.sheets[idx]?.cellMeta || [];
+      let cellMeta = workbookRef.current.sheets[idx]?.cellMeta || [];
       if (includeMeta) {
         // HOT's getCellsMeta() only returns *lazy-initialized* meta objects. Replacing the
         // full persisted `cellMeta` with that list drops formatting for cells the table has
         // never touched (e.g. other fillable highlights after marking a new region).
         const metaByKey = new Map<string, CellMetaEntry>();
         for (const m of cellMeta) {
-          if (!m || !Number.isFinite(+m.row) || !Number.isFinite(+m.col)) continue;
-          metaByKey.set(cellCoordKey(+m.row, +m.col), { ...m, row: +m.row, col: +m.col });
+          if (!m || !Number.isFinite(+m.row) || !Number.isFinite(+m.col))
+            continue;
+          metaByKey.set(cellCoordKey(+m.row, +m.col), {
+            ...m,
+            row: +m.row,
+            col: +m.col,
+          });
         }
 
         const cellsMeta =
@@ -1017,6 +1066,16 @@ const HandsontableWorkbook = React.forwardRef<
     onChange(snapshot);
   }, [onChange]);
 
+  React.useEffect(() => {
+    if (readOnly) return;
+    const onBeforeUnload = () => {
+      collectCurrentSheetFromHot(true);
+      emitWorkbookToParent();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
+
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
       const base = sheet?.grid?.length ? sheet.grid : [[""]];
@@ -1097,7 +1156,10 @@ const HandsontableWorkbook = React.forwardRef<
 
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
-    if (!readOnly) collectCurrentSheetFromHot(true, activeSheetIndex);
+    if (!readOnly) {
+      collectCurrentSheetFromHot(true, activeSheetIndex);
+      emitWorkbookToParent();
+    }
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
     setInitialGrid(toVisibleGrid(workbookRef.current.sheets[targetIndex]));
@@ -1324,11 +1386,24 @@ const HandsontableWorkbook = React.forwardRef<
   const toggleFillableSelection = () => {
     const hot = hotRef.current?.hotInstance;
     if (!hot || readOnly) return;
-    collectCurrentSheetFromHot(true);
+
+    const root = hot.rootElement as HTMLElement | undefined;
+    const container =
+      root?.closest('[role="dialog"]') ??
+      root?.closest(
+        ".overflow-y-auto, .overflow-auto, [data-radix-scroll-area-viewport]",
+      ) ??
+      document.documentElement;
+
+    const savedScrollTop = container?.scrollTop ?? window.scrollY;
+    const savedScrollLeft = container?.scrollLeft ?? window.scrollX;
+
+    const idx = activeSheetIndexRef.current;
+    collectCurrentSheetFromHot(true, idx);
+
     const range = getToolbarActionRange(hot);
     if (!range) return;
 
-    const idx = activeSheetIndexRef.current;
     const sheet = workbookRef.current.sheets[idx];
     if (!sheet) return;
 
@@ -1348,30 +1423,47 @@ const HandsontableWorkbook = React.forwardRef<
           .split(" ")
           .filter(Boolean);
         if (!tokens.includes("meta-fillable")) tokens.push("meta-fillable");
+        const newClassName = tokens.join(" ").trim();
+
+        hot.setCellMeta(r, c, "className", newClassName);
+
         metaByKey.set(key, {
           ...current,
           row: r,
           col: c,
-          className: tokens.join(" ").trim() || undefined,
+          className: newClassName || undefined,
         });
       }
     }
 
-    sheet.cellMeta = Array.from(metaByKey.values());
-    workbookRef.current.sheets[idx] = deepCloneSheet(
-      workbookRef.current.sheets[idx]!,
+    sheet.cellMeta = dedupeCellMetaByCoordinate(Array.from(metaByKey.values()));
+    workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
+
+    lastIncomingSignatureRef.current = workbookSignature(
+      workbookRef.current.sheets,
     );
-    emitWorkbookToParent();
-    if (hot && range) {
-      hot.selectCell(
-        range.startRow,
-        range.startCol,
-        range.endRow,
-        range.endCol,
-        false,
-        false,
-      );
-    }
+
+    hot.render();
+
+    hot.selectCell(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol,
+      false,
+      false,
+    );
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (container && container !== document.documentElement) {
+          container.scrollTop = savedScrollTop;
+          container.scrollLeft = savedScrollLeft;
+        } else {
+          window.scrollTo(savedScrollLeft, savedScrollTop);
+        }
+      });
+    });
   };
 
   // ─── sort / find-replace ────────────────────────────────────────────────────
@@ -1557,12 +1649,11 @@ const HandsontableWorkbook = React.forwardRef<
     emitWorkbookToParent();
   };
 
-  /** Persist column/row sizes to template and parent (e.g. before "Save Changes" without toolbar Save). */
+  /** Persist column/row sizes into `workbookRef` (parent gets them on Save / tab switch / unload). */
   const flushLayoutToParent = React.useCallback(() => {
     if (readOnly) return;
     collectCurrentSheetFromHot(true);
-    emitWorkbookToParent();
-  }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
+  }, [readOnly, collectCurrentSheetFromHot]);
 
   const exportXlsx = async () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
@@ -1652,16 +1743,12 @@ const HandsontableWorkbook = React.forwardRef<
   // ─── effects ─────────────────────────────────────────────────────────────────
 
   React.useEffect(() => {
-    const nextSheets = normalizeSheets(data);
+    const nextSheets = normalizedIncomingSheets;
     const sig = workbookSignature(nextSheets);
     if (sig === lastIncomingSignatureRef.current) return;
 
     const hot = hotRef.current?.hotInstance;
-    if (
-      hot &&
-      typeof hot.isEditorOpened === "function" &&
-      hot.isEditorOpened()
-    )
+    if (hot && typeof hot.isEditorOpened === "function" && hot.isEditorOpened())
       return;
 
     lastIncomingSignatureRef.current = sig;
@@ -1670,7 +1757,12 @@ const HandsontableWorkbook = React.forwardRef<
     const nextSheetCount = nextSheets.length;
     const sheetCountChanged = prevSheetCount !== nextSheetCount;
 
-    workbookRef.current = { sheets: nextSheets.map(deepCloneSheet) };
+    const prevSheets = workbookRef.current.sheets;
+    workbookRef.current = {
+      sheets: nextSheets.map((inc, i) =>
+        mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
+      ),
+    };
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1699,16 +1791,16 @@ const HandsontableWorkbook = React.forwardRef<
       // Let loadSheetIntoHot (incomingWorkbookKey) refresh HOT for the
       // preserved tab; avoid forcing sheet 0's grid into state here.
     }
-  }, [data, readOnly]);
+  }, [normalizedIncomingSheets, readOnly]);
 
   const incomingWorkbookKey = React.useMemo(
-    () => workbookSignature(normalizeSheets(data)),
-    [data],
+    () => workbookSignature(normalizedIncomingSheets),
+    [normalizedIncomingSheets],
   );
 
   const hotTableMountKey = React.useMemo(
-    () => hotTableMountSignature(normalizeSheets(data)),
-    [data],
+    () => hotTableMountSignature(normalizedIncomingSheets),
+    [normalizedIncomingSheets],
   );
 
   React.useEffect(() => {
@@ -1724,12 +1816,7 @@ const HandsontableWorkbook = React.forwardRef<
       const persistedClassName = String(persistedMeta?.className || "");
       const classTokens = persistedClassName.split(" ").filter(Boolean);
       const isFillable = readOnly
-        ? isPreviewFillableAt(
-            row,
-            col,
-            persistedCellMetaMap,
-            renderedMergeCells,
-          )
+        ? fillableCellSet.has(cellCoordKey(row, col))
         : classTokens.includes("meta-fillable");
       cp.readOnly = readOnly ? !isFillable : false;
       if (persistedMeta?.className) cp.className = persistedMeta.className;
@@ -1849,9 +1936,9 @@ const HandsontableWorkbook = React.forwardRef<
     },
     [
       persistedCellMetaMap,
+      fillableCellSet,
       imageMap,
       readOnly,
-      renderedMergeCells,
       renderedColWidths,
       renderedRowHeights,
     ],
@@ -1870,15 +1957,10 @@ const HandsontableWorkbook = React.forwardRef<
       // Do not trust `cellProps.className` alone: in preview we skip `setCellMeta` in
       // `loadSheetIntoHot`, so HOT often has no `meta-fillable` on the meta layer even when
       // persisted `cellMeta` does — that left `readOnly` stuck true and blocked all typing.
-      const isFillable = isPreviewFillableAt(
-        row,
-        col,
-        persistedCellMetaMap,
-        renderedMergeCells,
-      );
+      const isFillable = fillableCellSet.has(cellCoordKey(row, col));
       (cellProps as { readOnly?: boolean }).readOnly = !isFillable;
     },
-    [readOnly, persistedCellMetaMap, renderedMergeCells],
+    [readOnly, fillableCellSet],
   );
 
   // ─── Toolbar button wrapper — prevents focus loss ─────────────────────────
@@ -2528,11 +2610,7 @@ const HandsontableWorkbook = React.forwardRef<
           afterChange={(changes, source) => {
             // Preview (`readOnly`): never call undo/redo setState here — it runs on every
             // keystroke and re-renders the HotTable wrapper, which closes the editor and drops input.
-            if (
-              !readOnly &&
-              Array.isArray(changes) &&
-              changes.length > 0
-            ) {
+            if (!readOnly && Array.isArray(changes) && changes.length > 0) {
               refreshUndoRedoState();
             }
             if (
@@ -2575,7 +2653,7 @@ const HandsontableWorkbook = React.forwardRef<
                 clearTimeout(readOnlyEmitTimerRef.current);
                 readOnlyEmitTimerRef.current = setTimeout(() => {
                   emitWorkbookToParent();
-                }, 20000);
+                }, 15000);
               }
             }
           }}
@@ -2617,12 +2695,40 @@ const HandsontableWorkbook = React.forwardRef<
             };
             lastSelectionRef.current = range;
             sheetSelectionRef.current[activeSheetIndexRef.current] = range;
-            setSelectionLabel(toRangeLabel(range));
+
             if (readOnly) {
+              // Find the scrollable modal container
+              const root = hot.rootElement as HTMLElement | undefined;
+              const container =
+                root?.closest('[role="dialog"]') ??
+                root?.closest(
+                  "[data-radix-scroll-area-viewport], .overflow-y-auto, .overflow-auto",
+                ) ??
+                document.documentElement;
+
+              const savedTop = (container as HTMLElement)?.scrollTop ?? 0;
+              const savedLeft = (container as HTMLElement)?.scrollLeft ?? 0;
+
+              // These setState calls cause re-render → scroll jump
+              setSelectionLabel(toRangeLabel(range));
               const v = hot.getDataAtCell(range.startRow, range.startCol);
               setFormulaInput(v == null ? "" : String(v));
+
+              // Restore scroll after React commits the re-render
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  if (container && container !== document.documentElement) {
+                    (container as HTMLElement).scrollTop = savedTop;
+                    (container as HTMLElement).scrollLeft = savedLeft;
+                  } else {
+                    window.scrollTo(savedLeft, savedTop);
+                  }
+                });
+              });
               return;
             }
+
+            setSelectionLabel(toRangeLabel(range));
             syncToolbarFromCell(hot, r, c);
           }}
           afterMergeCells={() => {
