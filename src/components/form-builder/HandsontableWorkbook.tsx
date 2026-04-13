@@ -938,6 +938,14 @@ const HandsontableWorkbook = React.forwardRef<
         const cellsMeta =
           typeof hot.getCellsMeta === "function" ? hot.getCellsMeta() : [];
         for (const meta of cellsMeta || []) {
+          if (
+            typeof meta?.row !== "number" ||
+            typeof meta?.col !== "number" ||
+            meta.row < 0 ||
+            meta.col < 0
+          )
+            continue;
+
           const useful =
             Boolean(meta?.className) ||
             Boolean(meta?.type) ||
@@ -946,43 +954,55 @@ const HandsontableWorkbook = React.forwardRef<
             Boolean(meta?.numericFormat) ||
             Array.isArray(meta?.source) ||
             typeof meta?.strict === "boolean";
-          if (
-            typeof meta?.row === "number" &&
-            typeof meta?.col === "number" &&
-            meta.row >= 0 &&
-            meta.col >= 0 &&
-            useful
-          ) {
-            metaByKey.set(cellCoordKey(meta.row, meta.col), {
-              row: meta.row,
-              col: meta.col,
-              className: meta.className ? String(meta.className) : undefined,
-              type: meta.type ? String(meta.type) : undefined,
-              dateFormat: meta.dateFormat ? String(meta.dateFormat) : undefined,
-              correctFormat:
-                typeof meta.correctFormat === "boolean"
-                  ? meta.correctFormat
-                  : undefined,
-              numericFormat:
-                meta.numericFormat && typeof meta.numericFormat === "object"
-                  ? {
-                      pattern:
-                        typeof meta.numericFormat.pattern === "string"
-                          ? meta.numericFormat.pattern
-                          : undefined,
-                      culture:
-                        typeof meta.numericFormat.culture === "string"
-                          ? meta.numericFormat.culture
-                          : undefined,
-                    }
-                  : undefined,
-              source: Array.isArray(meta.source)
-                ? meta.source.map(String)
-                : undefined,
-              strict:
-                typeof meta.strict === "boolean" ? meta.strict : undefined,
-            });
+          if (!useful) continue;
+
+          const key = cellCoordKey(meta.row, meta.col);
+          const existing = metaByKey.get(key);
+
+          // Preserve persisted class tokens (e.g. `meta-fillable`) when HOT's
+          // lazily initialized meta for this cell has no className.
+          const existingTokens = String(existing?.className || "")
+            .split(/\s+/)
+            .filter(Boolean);
+          const hotTokens = String(meta?.className || "")
+            .split(/\s+/)
+            .filter(Boolean);
+          const mergedTokens = new Set([...hotTokens]);
+          for (const t of existingTokens) {
+            if (!mergedTokens.has(t)) mergedTokens.add(t);
           }
+          const mergedClassName = [...mergedTokens].join(" ").trim() || undefined;
+
+          metaByKey.set(key, {
+            row: meta.row,
+            col: meta.col,
+            className: mergedClassName,
+            type: meta.type ? String(meta.type) : existing?.type,
+            dateFormat: meta.dateFormat
+              ? String(meta.dateFormat)
+              : existing?.dateFormat,
+            correctFormat:
+              typeof meta.correctFormat === "boolean"
+                ? meta.correctFormat
+                : existing?.correctFormat,
+            numericFormat:
+              meta.numericFormat && typeof meta.numericFormat === "object"
+                ? {
+                    pattern:
+                      typeof meta.numericFormat.pattern === "string"
+                        ? meta.numericFormat.pattern
+                        : existing?.numericFormat?.pattern,
+                    culture:
+                      typeof meta.numericFormat.culture === "string"
+                        ? meta.numericFormat.culture
+                        : existing?.numericFormat?.culture,
+                  }
+                : existing?.numericFormat,
+            source: Array.isArray(meta.source)
+              ? meta.source.map(String)
+              : existing?.source,
+            strict: typeof meta.strict === "boolean" ? meta.strict : existing?.strict,
+          });
         }
         cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       }
