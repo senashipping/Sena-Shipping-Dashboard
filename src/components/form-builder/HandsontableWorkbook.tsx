@@ -59,8 +59,8 @@ export type HandsontableWorkbookRef = {
 };
 
 /** Capped grid for read-only / form preview so imports with huge dimensions stay responsive. */
-export const MAX_PREVIEW_ROWS = 220;
-export const MAX_PREVIEW_COLS = 80;
+export const MAX_PREVIEW_ROWS = 500;
+export const MAX_PREVIEW_COLS = 100;
 const FORMULAS_CONFIG = { engine: HyperFormula };
 
 /** Stable fallback so `safeGrid` / memoized slices do not get a fresh ref every render when the sheet is empty. */
@@ -983,7 +983,8 @@ const HandsontableWorkbook = React.forwardRef<
           for (const t of existingTokens) {
             if (!mergedTokens.has(t)) mergedTokens.add(t);
           }
-          const mergedClassName = [...mergedTokens].join(" ").trim() || undefined;
+          const mergedClassName =
+            [...mergedTokens].join(" ").trim() || undefined;
 
           metaByKey.set(key, {
             row: meta.row,
@@ -1013,7 +1014,8 @@ const HandsontableWorkbook = React.forwardRef<
             source: Array.isArray(meta.source)
               ? meta.source.map(String)
               : existing?.source,
-            strict: typeof meta.strict === "boolean" ? meta.strict : existing?.strict,
+            strict:
+              typeof meta.strict === "boolean" ? meta.strict : existing?.strict,
           });
         }
         cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
@@ -2589,7 +2591,7 @@ const HandsontableWorkbook = React.forwardRef<
           trimWhitespace={false}
           width="100%"
           stretchH={stretchColumnsInPreview ? "all" : "none"}
-          height={readOnly ? readOnlyHotHeight ?? 380 : 320}
+          height={readOnly ? (readOnlyHotHeight ?? 380) : 320}
           formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
           mergeCells={
             renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly
@@ -2795,8 +2797,9 @@ const HandsontableWorkbook = React.forwardRef<
 
       {isPreviewTruncated && (
         <div className="px-2 py-1 text-xs text-amber-700 border border-amber-200 rounded bg-amber-50">
-          Preview mode — showing first {previewRows} rows × {previewCols}{" "}
-          columns for stability.
+          Preview mode — workbooks are limited to at most {MAX_PREVIEW_ROWS} rows
+          × {MAX_PREVIEW_COLS} columns; showing {previewRows} × {previewCols}{" "}
+          for stability.
         </div>
       )}
     </div>
