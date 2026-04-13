@@ -674,7 +674,9 @@ const HandsontableWorkbook = React.forwardRef<
     (t, row) => t + (Array.isArray(row) ? row.length : 0),
     0,
   );
-  const shouldUseFormulaEngine = !readOnly && currentCellCount <= 20000;
+  // Keep formulas active in preview/runtime mode too, otherwise dependent cells
+  // never recalculate when users edit fillable inputs.
+  const shouldUseFormulaEngine = currentCellCount <= 20000;
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -905,8 +907,18 @@ const HandsontableWorkbook = React.forwardRef<
 
       const idx = sheetIndex ?? activeSheetIndexRef.current;
 
-      const nextGrid = (hot.getData?.() || []).map((row: any[]) =>
-        row.map((cell) => (cell == null ? "" : String(cell))),
+      // Persist source values (including formula expressions like "=A1+B1"),
+      // not rendered/calculated values, so reopened templates can recalculate.
+      const sourceGrid =
+        (typeof hot.getSourceDataArray === "function"
+          ? hot.getSourceDataArray()
+          : typeof hot.getSourceData === "function"
+            ? hot.getSourceData()
+            : hot.getData?.()) || [];
+      const nextGrid = (sourceGrid as any[]).map((row: any[]) =>
+        (Array.isArray(row) ? row : []).map((cell) =>
+          cell == null ? "" : String(cell),
+        ),
       );
 
       const mergeCells =
@@ -1976,6 +1988,13 @@ const HandsontableWorkbook = React.forwardRef<
   const afterGetCellMeta = React.useCallback(
     (row: number, col: number, cellProps: Record<string, unknown>) => {
       if (!readOnly) {
+        (cellProps as { readOnly?: boolean }).readOnly = false;
+        return;
+      }
+      // Formula cells must stay writable for HyperFormula recalculation updates.
+      const hot = hotRef.current?.hotInstance;
+      const cellValue = hot?.getSourceDataAtCell?.(row, col);
+      if (typeof cellValue === "string" && cellValue.startsWith("=")) {
         (cellProps as { readOnly?: boolean }).readOnly = false;
         return;
       }
