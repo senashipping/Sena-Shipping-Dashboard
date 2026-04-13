@@ -44,6 +44,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const [isImportingTemplate, setIsImportingTemplate] = React.useState(false);
   const [isWorkbookEditorOpen, setIsWorkbookEditorOpen] = React.useState(false);
   const [workbookDraft, setWorkbookDraft] = React.useState<any | null>(null);
+  const [applyImportedLogoToAllSheets, setApplyImportedLogoToAllSheets] = React.useState(true);
   const workbookEditorRef = React.useRef<HandsontableWorkbookRef>(null);
   const importTemplateInputRef = React.useRef<HTMLInputElement | null>(null);
   React.useEffect(() => {
@@ -79,6 +80,44 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
     }
     return btoa(binary);
+  };
+
+  const ensureWorkbookLogoOnEverySheet = (
+    sheets: Array<{
+      name: string;
+      grid: string[][];
+      images?: Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }>;
+    }>,
+  ) => {
+    const firstLogo =
+      sheets.flatMap((sheet) => sheet.images || []).find((img) => typeof img?.dataUrl === "string" && img.dataUrl.length > 0) || null;
+    if (!firstLogo) {
+      return { sheets, patchedCount: 0 };
+    }
+
+    let patchedCount = 0;
+    const nextSheets = sheets.map((sheet) => {
+      const hasLogo = Array.isArray(sheet.images) && sheet.images.some((img) => typeof img?.dataUrl === "string" && img.dataUrl.length > 0);
+      if (hasLogo) return sheet;
+
+      patchedCount += 1;
+      const fallbackRow = Math.max(0, Math.min(firstLogo.row || 0, Math.max(0, (sheet.grid?.length || 1) - 1)));
+      const fallbackCol = Math.max(0, Math.min(firstLogo.col || 0, Math.max(0, (sheet.grid?.[0]?.length || 1) - 1)));
+      return {
+        ...sheet,
+        images: [
+          {
+            row: fallbackRow,
+            col: fallbackCol,
+            rowspan: firstLogo.rowspan || 1,
+            colspan: firstLogo.colspan || 1,
+            dataUrl: firstLogo.dataUrl,
+          },
+        ],
+      };
+    });
+
+    return { sheets: nextSheets, patchedCount };
   };
 
   if (!selectedItem) {
@@ -140,7 +179,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         // Keep import robust even if image extraction fails.
       }
 
-      const sheets = workbook.SheetNames.map((name, index) => {
+      const importedSheets = workbook.SheetNames.map((name, index) => {
         const ws = workbook.Sheets[name];
         const ref = ws?.["!ref"] || "A1";
         const range = XLSX.utils.decode_range(ref);
@@ -265,6 +304,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         };
       });
 
+      const { sheets, patchedCount } = applyImportedLogoToAllSheets
+        ? ensureWorkbookLogoOnEverySheet(importedSheets)
+        : { sheets: importedSheets, patchedCount: 0 };
+
       onUpdate({
         excelTemplate: {
           sheets: sheets.length ? sheets : [{ name: "Sheet1", grid: [[""]] }],
@@ -276,7 +319,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
       toast({
         title: "Workbook imported",
-        description: `${sheets.length || 1} sheet(s) loaded into template`,
+        description:
+          patchedCount > 0
+            ? `${sheets.length || 1} sheet(s) loaded. Logo was applied to ${patchedCount} sheet(s) without images.`
+            : `${sheets.length || 1} sheet(s) loaded into template`,
         variant: "success",
       });
     } catch (error: any) {
@@ -386,6 +432,16 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               >
                 {isImportingTemplate ? "Importing..." : "Import .xlsx Template"}
               </Button>
+            </div>
+            <div className="flex items-center space-x-2 mt-2">
+              <Checkbox
+                id="apply-logo-all-sheets"
+                checked={applyImportedLogoToAllSheets}
+                onCheckedChange={(checked) => setApplyImportedLogoToAllSheets(Boolean(checked))}
+              />
+              <Label htmlFor="apply-logo-all-sheets" className="text-sm">
+                When importing, copy workbook logo to every sheet that has no image
+              </Label>
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
               <div>
