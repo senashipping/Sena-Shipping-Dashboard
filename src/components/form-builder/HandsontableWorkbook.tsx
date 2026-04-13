@@ -2311,44 +2311,36 @@ const HandsontableWorkbook = React.forwardRef<
         </div>
       )}
 
-      <div className="relative z-10 flex items-center gap-2 p-2 border rounded-md bg-white">
-        <span className="text-xs text-gray-500 font-medium w-12 shrink-0">
-          {selectionLabel}
-        </span>
-        <span className="text-xs text-gray-400 select-none">fx</span>
-        <input
-          value={formulaInput}
-          readOnly={readOnly}
-          onChange={
-            readOnly ? undefined : (e) => setFormulaInput(e.target.value)
-          }
-          onKeyDown={(e) => {
-            if (readOnly) return;
-            if (e.key === "Enter") {
-              e.preventDefault();
-              applyFormulaBar();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              const hot = hotRef.current?.hotInstance;
-              const idx = activeSheetIndexRef.current;
-              const r =
-                sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
-              if (hot) {
-                const v = hot.getDataAtCell(r.startRow, r.startCol);
-                setFormulaInput(v == null ? "" : String(v));
-                restoreHotRange(hot, r);
+      {!readOnly && (
+        <div className="relative z-10 flex items-center gap-2 p-2 border rounded-md bg-white">
+          <span className="text-xs text-gray-500 font-medium w-12 shrink-0">
+            {selectionLabel}
+          </span>
+          <span className="text-xs text-gray-400 select-none">fx</span>
+          <input
+            value={formulaInput}
+            onChange={(e) => setFormulaInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                applyFormulaBar();
               }
-            }
-          }}
-          className={
-            readOnly
-              ? "flex-1 h-8 px-2 text-sm border rounded font-mono bg-muted/40 cursor-default"
-              : "flex-1 h-8 px-2 text-sm border rounded font-mono"
-          }
-          placeholder="Type formula/value for active cell (e.g. =SUM(A1:A5))"
-        />
-        {!readOnly && (
+              if (e.key === "Escape") {
+                e.preventDefault();
+                const hot = hotRef.current?.hotInstance;
+                const idx = activeSheetIndexRef.current;
+                const r =
+                  sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
+                if (hot) {
+                  const v = hot.getDataAtCell(r.startRow, r.startCol);
+                  setFormulaInput(v == null ? "" : String(v));
+                  restoreHotRange(hot, r);
+                }
+              }
+            }}
+            className="flex-1 h-8 px-2 text-sm border rounded font-mono"
+            placeholder="Type formula/value for active cell (e.g. =SUM(A1:A5))"
+          />
           <Button
             type="button"
             size="sm"
@@ -2358,8 +2350,8 @@ const HandsontableWorkbook = React.forwardRef<
           >
             ✓ Apply
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Sheet tabs + sheet actions (separate rows) ── */}
       <div className="relative z-10 space-y-2">

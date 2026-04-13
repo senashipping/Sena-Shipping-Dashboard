@@ -871,16 +871,23 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
     );
   };
 
+  const showFormCardHeader =
+    Boolean(formState.title?.trim()) || Boolean(formState.description?.trim());
+
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
-          <CardTitle>{formState.title}</CardTitle>
-          {formState.description && (
-            <p className="text-sm text-gray-600">{formState.description}</p>
-          )}
-        </CardHeader>
-        <CardContent>
+        {showFormCardHeader && (
+          <CardHeader>
+            {formState.title?.trim() ? (
+              <CardTitle>{formState.title}</CardTitle>
+            ) : null}
+            {formState.description?.trim() ? (
+              <p className="text-sm text-gray-600">{formState.description}</p>
+            ) : null}
+          </CardHeader>
+        )}
+        <CardContent className={!showFormCardHeader ? "pt-6" : undefined}>
           <div className="space-y-6">
             {formState.formType === "regular" && (
               <div className="grid grid-cols-12 gap-4">
