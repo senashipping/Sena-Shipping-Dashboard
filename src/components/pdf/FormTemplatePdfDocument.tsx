@@ -8,6 +8,8 @@ import {
   Image,
 } from "@react-pdf/renderer";
 import type { FormField, FormSection, TableColumn, TableConfig } from "../../types";
+import type { EmbeddedExcelPdfWorkbook } from "./EmbeddedExcelWorkbookPdf";
+import { EmbeddedExcelWorkbookPdf } from "./EmbeddedExcelWorkbookPdf";
 
 // ─── Colour palette ────────────────────────────────────────────────────────
 const C = {
@@ -365,15 +367,8 @@ function formatFieldValue(field: FormField, raw: any, variant: FormTemplatePdfVa
       if (s2.startsWith("data:image")) return { imageSrc: s2 };
       return { text: s2 || "\u2014" };
     }
-    case "embedded_excel": {
-      if (raw && typeof raw === "object" && Array.isArray((raw as any).sheets)) {
-        const parts = (raw as { sheets: { name: string; grid: unknown[][] }[] }).sheets.map(
-          (sh) => `${sh.name}: ${sh.grid?.length ?? 0}×${sh.grid?.[0]?.length ?? 0} cells`,
-        );
-        return { text: parts.length ? parts.join("; ") : "\u2014" };
-      }
-      return { text: "\u2014" };
-    }
+    case "embedded_excel":
+      return { text: "" };
     default:
       return { text: String(raw) };
   }
@@ -394,6 +389,22 @@ function statusStyle(status?: string) {
 }
 
 // ─── FieldBlock ───────────────────────────────────────────────────────────
+function resolveEmbeddedExcelWorkbook(field: FormField, valueOverride: any): EmbeddedExcelPdfWorkbook | null {
+  const fromSubmission =
+    valueOverride &&
+    typeof valueOverride === "object" &&
+    Array.isArray((valueOverride as EmbeddedExcelPdfWorkbook).sheets) &&
+    (valueOverride as EmbeddedExcelPdfWorkbook).sheets.length
+      ? (valueOverride as EmbeddedExcelPdfWorkbook)
+      : null;
+  if (fromSubmission) return fromSubmission;
+  const tpl = field.excelTemplate;
+  if (tpl && Array.isArray(tpl.sheets) && tpl.sheets.length) {
+    return { sheets: tpl.sheets as EmbeddedExcelPdfWorkbook["sheets"] };
+  }
+  return null;
+}
+
 function FieldBlock({
   field,
   variant,
@@ -403,6 +414,20 @@ function FieldBlock({
   variant: FormTemplatePdfVariant;
   valueOverride?: any;
 }) {
+  if (field.type === "embedded_excel") {
+    const workbook = resolveEmbeddedExcelWorkbook(field, valueOverride);
+    return (
+      <View style={{ marginBottom: 12 }} wrap>
+        <Text style={s.fieldLabel}>
+          {field.label}
+          {field.required ? " *" : ""}
+        </Text>
+        {field.description ? <Text style={s.fieldDesc}>{field.description}</Text> : null}
+        <EmbeddedExcelWorkbookPdf workbook={workbook} />
+      </View>
+    );
+  }
+
   const { text, imageSrc } = formatFieldValue(field, valueOverride, variant);
   const isFilled = variant === "filled" && text && text !== "\u2014";
 
