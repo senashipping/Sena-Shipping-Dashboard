@@ -1831,6 +1831,7 @@ const HandsontableWorkbook = React.forwardRef<
           value: any,
           cellProperties: any,
         ) => {
+          if (!td) return td;
           const isCheckboxCell = String(cellProperties?.type || "") === "checkbox";
           if (isCheckboxCell) {
             checkboxRenderer(
@@ -2552,12 +2553,19 @@ const HandsontableWorkbook = React.forwardRef<
                   if (!toCheckboxChecked(newValue)) continue;
                   const opposite = oppositeCellByKey.get(key);
                   if (!opposite) continue;
-                  hot.setDataAtCell(
-                    opposite.row,
-                    opposite.col,
-                    "false",
-                    "yesNoSync",
-                  );
+                  // Defer the write so it runs outside the current afterChange
+                  // call stack — calling setDataAtCell re-entrantly inside
+                  // afterChange causes a crash in Handsontable 17.
+                  const _hot = hot;
+                  const _opp = opposite;
+                  setTimeout(() => {
+                    _hot.setDataAtCell(
+                      _opp.row,
+                      _opp.col,
+                      "false",
+                      "yesNoSync",
+                    );
+                  }, 0);
                 }
               }
             }
