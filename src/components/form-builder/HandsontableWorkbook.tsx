@@ -1575,11 +1575,15 @@ const HandsontableWorkbook = React.forwardRef<
         for (const c of colB !== null ? [colA, colB] : [colA]) {
           hot.setCellMeta(r, c, "type", "checkbox");
           hot.setCellMeta(r, c, "checkedTemplate", "true");
-          hot.setCellMeta(r, c, "uncheckedTemplate", "false");
+          hot.setCellMeta(r, c, "uncheckedTemplate", "");
 
           const val = hot.getDataAtCell(r, c);
-          if (val !== "true" && val !== "false" && val !== true && val !== false) {
-            hot.setDataAtCell(r, c, "false");
+          if (
+            val !== "true" &&
+            val !== true &&
+            String(val ?? "").trim().toLowerCase() !== "yes"
+          ) {
+            hot.setDataAtCell(r, c, "");
           }
 
           const key = cellCoordKey(r, c);
@@ -1651,10 +1655,14 @@ const HandsontableWorkbook = React.forwardRef<
       for (let c = range.startCol; c <= range.endCol; c++) {
         hot.setCellMeta(r, c, "type", "checkbox");
         hot.setCellMeta(r, c, "checkedTemplate", "true");
-        hot.setCellMeta(r, c, "uncheckedTemplate", "false");
+        hot.setCellMeta(r, c, "uncheckedTemplate", "");
         const val = hot.getDataAtCell(r, c);
-        if (val !== "true" && val !== "false" && val !== true && val !== false) {
-          hot.setDataAtCell(r, c, "false");
+        if (
+          val !== "true" &&
+          val !== true &&
+          String(val ?? "").trim().toLowerCase() !== "yes"
+        ) {
+          hot.setDataAtCell(r, c, "");
         }
         const key = cellCoordKey(r, c);
         const existing = metaByKey.get(key);
@@ -2061,13 +2069,13 @@ const HandsontableWorkbook = React.forwardRef<
       if (persistedMeta?.type === "checkbox") {
         cp.type = "checkbox";
         cp.checkedTemplate = "true";
-        cp.uncheckedTemplate = "false";
+        cp.uncheckedTemplate = "";
       }
       if (isYesNoCheckboxCell) {
         cp.type = "checkbox";
         // Workbook grid is persisted as strings; keep checkbox templates aligned.
         cp.checkedTemplate = "true";
-        cp.uncheckedTemplate = "false";
+        cp.uncheckedTemplate = "";
       }
       if (persistedMeta?.dateFormat) cp.dateFormat = persistedMeta.dateFormat;
       if (typeof persistedMeta?.correctFormat === "boolean")
@@ -2291,7 +2299,7 @@ const HandsontableWorkbook = React.forwardRef<
             const _hot = hot;
             const _opp = opposite;
             setTimeout(() => {
-              _hot.setDataAtCell(_opp.row, _opp.col, "false", "yesNoSync");
+              _hot.setDataAtCell(_opp.row, _opp.col, "", "yesNoSync");
             }, 0);
           }
         }
