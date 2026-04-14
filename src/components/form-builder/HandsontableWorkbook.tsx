@@ -24,6 +24,8 @@ export type SheetData = {
     col: number;
     className?: string;
     type?: string;
+    checkedTemplate?: string;
+    uncheckedTemplate?: string;
     dateFormat?: string;
     correctFormat?: boolean;
     numericFormat?: { pattern?: string; culture?: string };
@@ -180,6 +182,14 @@ const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] => {
                 className:
                   typeof m.className === "string" ? m.className : undefined,
                 type: typeof m.type === "string" ? m.type : undefined,
+                checkedTemplate:
+                  typeof m.checkedTemplate === "string"
+                    ? m.checkedTemplate
+                    : undefined,
+                uncheckedTemplate:
+                  typeof m.uncheckedTemplate === "string"
+                    ? m.uncheckedTemplate
+                    : undefined,
                 dateFormat:
                   typeof m.dateFormat === "string" ? m.dateFormat : undefined,
                 correctFormat:
@@ -293,6 +303,8 @@ const deepCloneSheet = (s: SheetData): SheetData => ({
       col: m.col,
       className: m.className,
       type: m.type,
+      checkedTemplate: m.checkedTemplate,
+      uncheckedTemplate: m.uncheckedTemplate,
       dateFormat: m.dateFormat,
       correctFormat: m.correctFormat,
       numericFormat:
@@ -379,6 +391,14 @@ const dedupeCellMetaByCoordinate = (
       col,
       className: raw.className ? String(raw.className) : undefined,
       type: typeof raw.type === "string" ? raw.type : undefined,
+      checkedTemplate:
+        typeof raw.checkedTemplate === "string"
+          ? raw.checkedTemplate
+          : undefined,
+      uncheckedTemplate:
+        typeof raw.uncheckedTemplate === "string"
+          ? raw.uncheckedTemplate
+          : undefined,
       dateFormat:
         typeof raw.dateFormat === "string" ? raw.dateFormat : undefined,
       correctFormat:
@@ -409,6 +429,8 @@ const dedupeCellMetaByCoordinate = (
       col,
       className: mergeClassNameStrings(prev.className, next.className),
       type: next.type ?? prev.type,
+      checkedTemplate: next.checkedTemplate ?? prev.checkedTemplate,
+      uncheckedTemplate: next.uncheckedTemplate ?? prev.uncheckedTemplate,
       dateFormat: next.dateFormat ?? prev.dateFormat,
       correctFormat:
         typeof next.correctFormat === "boolean"
@@ -681,6 +703,7 @@ const HandsontableWorkbook = React.forwardRef<
   const yesNoOppositeCellMapRef = React.useRef<
     Map<string, { row: number; col: number }>
   >(new Map());
+  const suppressNextHotReloadRef = React.useRef(false);
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -771,8 +794,7 @@ const HandsontableWorkbook = React.forwardRef<
     const sampledWidth = measuredWidths
       .slice(0, widthSample)
       .reduce((sum, w) => sum + Math.max(24, Number(w) || 80), 0);
-    const estimatedAvgWidth =
-      widthSample > 0 ? sampledWidth / widthSample : 80;
+    const estimatedAvgWidth = widthSample > 0 ? sampledWidth / widthSample : 80;
     const visibleColsAt100 = Math.floor(hotViewportWidth / estimatedAvgWidth);
     const overflowAt100 = colCount - visibleColsAt100;
     // Only zoom when sheet is truly wide; keep normal files at 100%.
@@ -870,76 +892,78 @@ const HandsontableWorkbook = React.forwardRef<
    * Snapshot selection from HOT at action time (getSelectedRangeLast first).
    * Use this in toolbar handlers instead of reading selection after focus moved.
    */
-  const getToolbarActionRange = React.useCallback(
-    (hot: any) => {
-      if (!hot) return null;
-      const idx = activeSheetIndexRef.current;
-      const sheet = workbookRef.current.sheets[idx];
-      const rowCount = Math.max(1, sheet?.grid?.length || 1);
-      const colCount = Math.max(1, sheet?.grid?.[0]?.length || 1);
+  const getToolbarActionRange = React.useCallback((hot: any) => {
+    if (!hot) return null;
+    const idx = activeSheetIndexRef.current;
+    const sheet = workbookRef.current.sheets[idx];
+    const rowCount = Math.max(1, sheet?.grid?.length || 1);
+    const colCount = Math.max(
+      1,
+      ...(sheet?.grid || []).map((row) =>
+        Array.isArray(row) ? row.length : 0,
+      ),
+    );
 
-      const clamp = (range: {
-        startRow: number;
-        endRow: number;
-        startCol: number;
-        endCol: number;
-      }) => ({
-        startRow: Math.max(
-          0,
-          Math.min(rowCount - 1, Math.min(range.startRow, range.endRow)),
-        ),
-        endRow: Math.max(
-          0,
-          Math.min(rowCount - 1, Math.max(range.startRow, range.endRow)),
-        ),
-        startCol: Math.max(
-          0,
-          Math.min(colCount - 1, Math.min(range.startCol, range.endCol)),
-        ),
-        endCol: Math.max(
-          0,
-          Math.min(colCount - 1, Math.max(range.startCol, range.endCol)),
-        ),
+    const clamp = (range: {
+      startRow: number;
+      endRow: number;
+      startCol: number;
+      endCol: number;
+    }) => ({
+      startRow: Math.max(
+        0,
+        Math.min(rowCount - 1, Math.min(range.startRow, range.endRow)),
+      ),
+      endRow: Math.max(
+        0,
+        Math.min(rowCount - 1, Math.max(range.startRow, range.endRow)),
+      ),
+      startCol: Math.max(
+        0,
+        Math.min(colCount - 1, Math.min(range.startCol, range.endCol)),
+      ),
+      endCol: Math.max(
+        0,
+        Math.min(colCount - 1, Math.max(range.startCol, range.endCol)),
+      ),
+    });
+
+    const sel =
+      typeof hot.getSelectedRangeLast === "function"
+        ? hot.getSelectedRangeLast()
+        : null;
+    if (sel?.from != null && sel?.to != null) {
+      const r = clamp({
+        startRow: sel.from.row,
+        endRow: sel.to.row,
+        startCol: sel.from.col,
+        endCol: sel.to.col,
       });
+      lastSelectionRef.current = r;
+      sheetSelectionRef.current[idx] = r;
+      return r;
+    }
 
-      const sel =
-        typeof hot.getSelectedRangeLast === "function"
-          ? hot.getSelectedRangeLast()
-          : null;
-      if (sel?.from != null && sel?.to != null) {
-        const r = clamp({
-          startRow: sel.from.row,
-          endRow: sel.to.row,
-          startCol: sel.from.col,
-          endCol: sel.to.col,
-        });
-        lastSelectionRef.current = r;
-        sheetSelectionRef.current[idx] = r;
-        return r;
-      }
+    const last = hot.getSelectedLast?.();
+    if (
+      last &&
+      last.length >= 4 &&
+      last.every((v: any) => Number.isInteger(v))
+    ) {
+      const r = clamp({
+        startRow: last[0],
+        endRow: last[2],
+        startCol: last[1],
+        endCol: last[3],
+      });
+      lastSelectionRef.current = r;
+      sheetSelectionRef.current[idx] = r;
+      return r;
+    }
 
-      const last = hot.getSelectedLast?.();
-      if (
-        last &&
-        last.length >= 4 &&
-        last.every((v: any) => Number.isInteger(v))
-      ) {
-        const r = clamp({
-          startRow: last[0],
-          endRow: last[2],
-          startCol: last[1],
-          endCol: last[3],
-        });
-        lastSelectionRef.current = r;
-        sheetSelectionRef.current[idx] = r;
-        return r;
-      }
-
-      const cached = sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
-      return clamp(cached);
-    },
-    [],
-  );
+    const cached = sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
+    return clamp(cached);
+  }, []);
 
   const restoreHotRange = (
     hot: any,
@@ -1090,6 +1114,8 @@ const HandsontableWorkbook = React.forwardRef<
           const useful =
             Boolean(meta?.className) ||
             Boolean(meta?.type) ||
+            meta?.checkedTemplate !== undefined ||
+            meta?.uncheckedTemplate !== undefined ||
             Boolean(meta?.dateFormat) ||
             typeof meta?.correctFormat === "boolean" ||
             Boolean(meta?.numericFormat) ||
@@ -1120,6 +1146,14 @@ const HandsontableWorkbook = React.forwardRef<
             col: meta.col,
             className: mergedClassName,
             type: meta.type ? String(meta.type) : existing?.type,
+            checkedTemplate:
+              meta.checkedTemplate !== undefined
+                ? String(meta.checkedTemplate)
+                : existing?.checkedTemplate,
+            uncheckedTemplate:
+              meta.uncheckedTemplate !== undefined
+                ? String(meta.uncheckedTemplate)
+                : existing?.uncheckedTemplate,
             dateFormat: meta.dateFormat
               ? String(meta.dateFormat)
               : existing?.dateFormat,
@@ -1230,8 +1264,12 @@ const HandsontableWorkbook = React.forwardRef<
   );
 
   const emitWorkbookToParent = React.useCallback(() => {
-    const snapshot = { sheets: workbookRef.current.sheets.map(deepCloneSheet) };
-    lastIncomingSignatureRef.current = workbookSignature(snapshot.sheets);
+    const nextSheets = workbookRef.current.sheets.map(deepCloneSheet);
+    const snapshot = { sheets: nextSheets };
+    // Keep this in sync with the exact workbook payload we emit so
+    // the incoming-data guard does not treat our own write as foreign.
+    lastIncomingSignatureRef.current = workbookSignature(nextSheets);
+    suppressNextHotReloadRef.current = true;
     onChange(snapshot);
   }, [onChange]);
 
@@ -1258,12 +1296,79 @@ const HandsontableWorkbook = React.forwardRef<
     [readOnly],
   );
 
+  const normalizeLegacyCheckboxValues = React.useCallback(
+    (sheet?: SheetData) => {
+      if (!sheet?.grid?.length || !sheet?.cellMeta?.length) return;
+      const checkboxCoords = new Set<string>();
+      for (const meta of sheet.cellMeta) {
+        const cls = String(meta?.className || "");
+        const isCheckboxMeta =
+          String(meta?.type || "") === "checkbox" ||
+          Boolean(extractYesNoPairToken(cls)) ||
+          cls.split(/\s+/).includes(SINGLE_CHECKBOX_CLASS);
+        if (isCheckboxMeta)
+          checkboxCoords.add(cellCoordKey(meta.row, meta.col));
+      }
+      if (checkboxCoords.size === 0) return;
+
+      let gridChanged = false;
+      const nextGrid = sheet.grid.map((row, r) => {
+        if (!Array.isArray(row)) return row;
+        let rowChanged = false;
+        const nextRow = [...row];
+        for (let c = 0; c < row.length; c++) {
+          if (!checkboxCoords.has(cellCoordKey(r, c))) continue;
+          const raw = row[c];
+          const normalized = toCheckboxChecked(raw) ? "true" : "";
+          if (String(raw ?? "") !== normalized) {
+            nextRow[c] = normalized;
+            rowChanged = true;
+            gridChanged = true;
+          }
+        }
+        return rowChanged ? nextRow : row;
+      });
+
+      if (gridChanged) {
+        sheet.grid = nextGrid;
+      }
+      // Legacy fallback: some old templates lost checkbox meta for many cells but
+      // still persisted literal "false" strings. If the sheet uses checkboxes at
+      // all, normalize those literals globally so old pages don't show raw text.
+      if (checkboxCoords.size > 0) {
+        let fallbackChanged = false;
+        const fallbackGrid = sheet.grid.map((row) => {
+          if (!Array.isArray(row)) return row;
+          let rowChanged = false;
+          const nextRow = [...row];
+          for (let c = 0; c < row.length; c++) {
+            const raw = row[c];
+            const normalizedRaw = String(raw ?? "")
+              .trim()
+              .toLowerCase();
+            if (normalizedRaw === "false") {
+              nextRow[c] = "";
+              rowChanged = true;
+              fallbackChanged = true;
+            }
+          }
+          return rowChanged ? nextRow : row;
+        });
+        if (fallbackChanged) {
+          sheet.grid = fallbackGrid;
+        }
+      }
+    },
+    [],
+  );
+
   const loadSheetIntoHot = React.useCallback(
     (targetIndex: number) => {
       const hot = hotRef.current?.hotInstance;
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+      normalizeLegacyCheckboxValues(sheet);
 
       // Save the HOT grid's pixel scroll position before loadData resets it.
       // hot.loadData() always resets the viewport to (0,0), and the HotTable
@@ -1298,6 +1403,20 @@ const HandsontableWorkbook = React.forwardRef<
           if (meta.className)
             hot.setCellMeta(meta.row, meta.col, "className", meta.className);
           if (meta.type) hot.setCellMeta(meta.row, meta.col, "type", meta.type);
+          if (meta.checkedTemplate !== undefined)
+            hot.setCellMeta(
+              meta.row,
+              meta.col,
+              "checkedTemplate",
+              meta.checkedTemplate,
+            );
+          if (meta.uncheckedTemplate !== undefined)
+            hot.setCellMeta(
+              meta.row,
+              meta.col,
+              "uncheckedTemplate",
+              meta.uncheckedTemplate,
+            );
           if (meta.dateFormat)
             hot.setCellMeta(meta.row, meta.col, "dateFormat", meta.dateFormat);
           if (typeof meta.correctFormat === "boolean")
@@ -1364,7 +1483,7 @@ const HandsontableWorkbook = React.forwardRef<
         });
       }
     },
-    [readOnly, toVisibleGrid],
+    [readOnly, toVisibleGrid, normalizeLegacyCheckboxValues],
   );
 
   const handleSheetSwitch = (targetIndex: number) => {
@@ -1539,168 +1658,105 @@ const HandsontableWorkbook = React.forwardRef<
 
   // ─── validation helpers ─────────────────────────────────────────────────────
 
-  const setYesNoToggle = () => {
-    const hot = hotRef.current?.hotInstance;
-    if (!hot || readOnly) return;
-    const root = hot.rootElement as HTMLElement | undefined;
-    const container =
-      root?.closest('[role="dialog"]') ??
-      root?.closest(
-        ".overflow-y-auto, .overflow-auto, [data-radix-scroll-area-viewport]",
-      ) ??
-      document.documentElement;
-    const savedScrollTop = (container as HTMLElement)?.scrollTop ?? window.scrollY;
-    const savedScrollLeft =
-      (container as HTMLElement)?.scrollLeft ?? window.scrollX;
-    const range = getToolbarActionRange(hot);
-    if (!range) return;
-    const idx = activeSheetIndexRef.current;
-    const sheet = workbookRef.current.sheets[idx];
-    const metaByKey = new Map<
-      string,
-      NonNullable<SheetData["cellMeta"]>[number]
-    >();
-    for (const meta of sheet?.cellMeta || []) {
-      metaByKey.set(cellCoordKey(meta.row, meta.col), { ...meta });
-    }
+  const applyCheckboxMetaToSelection = React.useCallback(
+    (
+      options:
+        | { kind: "yesno"; checkedTemplate: "YES"; uncheckedTemplate: "NO" }
+        | {
+            kind: "checkbox";
+            checkedTemplate: "true";
+            uncheckedTemplate: "";
+          },
+    ) => {
+      const hot = hotRef.current?.hotInstance;
+      if (!hot || readOnly) return;
+      const range = getToolbarActionRange(hot);
+      if (!range) return;
+      if (
+        options.kind === "yesno" &&
+        range.endCol - range.startCol + 1 !== 2
+      )
+        return;
+      const pairEpoch = Date.now();
 
-    // Pair cells in groups of 2 columns per row so mutual-exclusion sync works.
-    for (let r = range.startRow; r <= range.endRow; r++) {
-      for (let ci = range.startCol; ci <= range.endCol; ci += 2) {
-        const colA = ci;
-        const colB = ci + 1 <= range.endCol ? ci + 1 : null;
-        // Unique token shared by both cells in the pair.
-        const pairToken = `${YES_NO_PAIR_TOKEN_PREFIX}${r}-${colA}-${Date.now()}`;
-
-        for (const c of colB !== null ? [colA, colB] : [colA]) {
-          hot.setCellMeta(r, c, "type", "checkbox");
-          hot.setCellMeta(r, c, "checkedTemplate", "true");
-          hot.setCellMeta(r, c, "uncheckedTemplate", "");
-
-          const val = hot.getDataAtCell(r, c);
-          if (
-            val !== "true" &&
-            val !== true &&
-            String(val ?? "").trim().toLowerCase() !== "yes"
-          ) {
-            hot.setDataAtCell(r, c, "");
+      const apply = () => {
+        if (options.kind === "yesno") {
+          for (let r = range.startRow; r <= range.endRow; r++) {
+            const leftCol = range.startCol;
+            const rightCol = range.startCol + 1;
+            const pairToken = `${YES_NO_PAIR_TOKEN_PREFIX}${pairEpoch}-${r}`;
+            const coords: Array<[number, number]> = [
+              [r, leftCol],
+              [r, rightCol],
+            ];
+            for (const [rowIndex, colIndex] of coords) {
+              const currentTokens = String(
+                hot.getCellMeta(rowIndex, colIndex)?.className || "",
+              )
+                .split(/\s+/)
+                .filter(Boolean)
+                .filter(
+                  (token: string) =>
+                    token !== SINGLE_CHECKBOX_CLASS &&
+                    !token.startsWith(YES_NO_PAIR_TOKEN_PREFIX),
+                );
+              currentTokens.push(pairToken);
+              hot.setCellMeta(rowIndex, colIndex, "className", currentTokens.join(" "));
+              hot.setCellMeta(rowIndex, colIndex, "type", "checkbox");
+              hot.setCellMeta(rowIndex, colIndex, "checkedTemplate", options.checkedTemplate);
+              hot.setCellMeta(
+                rowIndex,
+                colIndex,
+                "uncheckedTemplate",
+                options.uncheckedTemplate,
+              );
+            }
           }
-
-          const key = cellCoordKey(r, c);
-          const existing = metaByKey.get(key);
-          // Strip any pre-existing pair token, then add the new one (only when
-          // there is actually a partner cell so the pair has exactly 2 members).
-          const baseClass = String(existing?.className || "")
-            .split(/\s+/)
-            .filter((t) => Boolean(t) && !t.startsWith(YES_NO_PAIR_TOKEN_PREFIX))
-            .join(" ");
-          const newClassName =
-            colB !== null
-              ? [baseClass, pairToken].filter(Boolean).join(" ").trim()
-              : baseClass;
-
-          hot.setCellMeta(r, c, "className", newClassName);
-
-          metaByKey.set(key, {
-            row: r,
-            col: c,
-            className: newClassName || undefined,
-            type: "checkbox",
-            dateFormat: existing?.dateFormat,
-            correctFormat: existing?.correctFormat,
-            numericFormat: existing?.numericFormat,
-            source: existing?.source,
-            strict: existing?.strict,
-          });
+          return;
         }
-      }
-    }
-
-    if (sheet) {
-      sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
-      workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
-      yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
-    }
-    collectCurrentSheetFromHot(true);
-    emitWorkbookToParent();
-    restoreHotRange(hot, range);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (container && container !== document.documentElement) {
-          (container as HTMLElement).scrollTop = savedScrollTop;
-          (container as HTMLElement).scrollLeft = savedScrollLeft;
-        } else {
-          window.scrollTo(savedScrollLeft, savedScrollTop);
+        for (let r = range.startRow; r <= range.endRow; r++) {
+          for (let c = range.startCol; c <= range.endCol; c++) {
+            const currentTokens = String(hot.getCellMeta(r, c)?.className || "")
+              .split(/\s+/)
+              .filter(Boolean)
+              .filter((token: string) => !token.startsWith(YES_NO_PAIR_TOKEN_PREFIX));
+            if (!currentTokens.includes(SINGLE_CHECKBOX_CLASS))
+              currentTokens.push(SINGLE_CHECKBOX_CLASS);
+            hot.setCellMeta(r, c, "className", currentTokens.join(" "));
+            hot.setCellMeta(r, c, "type", "checkbox");
+            hot.setCellMeta(r, c, "checkedTemplate", options.checkedTemplate);
+            hot.setCellMeta(r, c, "uncheckedTemplate", options.uncheckedTemplate);
+          }
         }
-      });
+      };
+      if (typeof hot.batch === "function") hot.batch(apply);
+      else apply();
+
+      collectCurrentSheetFromHot(true);
+      const idx = activeSheetIndexRef.current;
+      const sheet = workbookRef.current.sheets[idx];
+      yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet?.cellMeta);
+      scheduleUndoRedoRefresh();
+      hot.render();
+      restoreHotRange(hot, range);
+    },
+    [collectCurrentSheetFromHot, getToolbarActionRange, readOnly, scheduleUndoRedoRefresh],
+  );
+
+  const setYesNoToggle = () => {
+    applyCheckboxMetaToSelection({
+      kind: "yesno",
+      checkedTemplate: "YES",
+      uncheckedTemplate: "NO",
     });
   };
 
   const setSingleCheckbox = () => {
-    const hot = hotRef.current?.hotInstance;
-    if (!hot || readOnly) return;
-    const range = getToolbarActionRange(hot);
-    if (!range) return;
-    const idx = activeSheetIndexRef.current;
-    const sheet = workbookRef.current.sheets[idx];
-    const metaByKey = new Map<
-      string,
-      NonNullable<SheetData["cellMeta"]>[number]
-    >();
-    for (const meta of sheet?.cellMeta || []) {
-      metaByKey.set(cellCoordKey(meta.row, meta.col), { ...meta });
-    }
-
-    for (let r = range.startRow; r <= range.endRow; r++) {
-      for (let c = range.startCol; c <= range.endCol; c++) {
-        hot.setCellMeta(r, c, "type", "checkbox");
-        hot.setCellMeta(r, c, "checkedTemplate", "true");
-        hot.setCellMeta(r, c, "uncheckedTemplate", "");
-        const val = hot.getDataAtCell(r, c);
-        if (
-          val !== "true" &&
-          val !== true &&
-          String(val ?? "").trim().toLowerCase() !== "yes"
-        ) {
-          hot.setDataAtCell(r, c, "");
-        }
-        const key = cellCoordKey(r, c);
-        const existing = metaByKey.get(key);
-        const classTokens = String(existing?.className || "")
-          .split(/\s+/)
-          .filter(
-            (t) =>
-              Boolean(t) &&
-              !t.startsWith(YES_NO_PAIR_TOKEN_PREFIX) &&
-              t !== SINGLE_CHECKBOX_CLASS,
-          );
-        const newClassName = [...classTokens, SINGLE_CHECKBOX_CLASS]
-          .filter(Boolean)
-          .join(" ")
-          .trim();
-        hot.setCellMeta(r, c, "className", newClassName);
-        metaByKey.set(key, {
-          row: r,
-          col: c,
-          className: newClassName || undefined,
-          type: "checkbox",
-          dateFormat: existing?.dateFormat,
-          correctFormat: existing?.correctFormat,
-          numericFormat: existing?.numericFormat,
-          source: existing?.source,
-          strict: existing?.strict,
-        });
-      }
-    }
-
-    if (sheet) {
-      sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
-      workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
-      yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
-    }
-    collectCurrentSheetFromHot(true);
-    emitWorkbookToParent();
-    restoreHotRange(hot, range);
+    applyCheckboxMetaToSelection({
+      kind: "checkbox",
+      checkedTemplate: "true",
+      uncheckedTemplate: "",
+    });
   };
 
   const toggleFillableSelection = () => {
@@ -1810,6 +1866,65 @@ const HandsontableWorkbook = React.forwardRef<
     ur.redo();
     refreshUndoRedoState();
     if (hot && r) restoreHotRange(hot, r);
+  };
+
+  // ─── clear cells ────────────────────────────────────────────────────────────
+
+  const clearSelectedCells = () => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
+
+    // Build the set of keys being cleared so we can wipe them everywhere.
+    const clearKeys = new Set<string>();
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (let c = range.startCol; c <= range.endCol; c++) {
+        clearKeys.add(cellCoordKey(r, c));
+      }
+    }
+
+    // 1. Erase cell values.
+    const changes: Array<[number, number, string]> = [];
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (let c = range.startCol; c <= range.endCol; c++) {
+        changes.push([r, c, ""]);
+      }
+    }
+    if (changes.length) hot.setDataAtCell(changes);
+
+    // 2. Strip HOT's in-memory meta (type reset to "text" so checkbox renderer is removed).
+    const stripHotMeta = () => {
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          hot.setCellMeta(r, c, "className", "");
+          hot.setCellMeta(r, c, "type", "text");
+          hot.setCellMeta(r, c, "numericFormat", undefined);
+          hot.setCellMeta(r, c, "dateFormat", undefined);
+          hot.setCellMeta(r, c, "correctFormat", undefined);
+          hot.setCellMeta(r, c, "source", undefined);
+          hot.setCellMeta(r, c, "strict", undefined);
+        }
+      }
+    };
+    if (typeof hot.batch === "function") hot.batch(stripHotMeta);
+    else stripHotMeta();
+
+    // 3. Remove the cleared cells from the persisted workbook meta so that
+    //    collectCurrentSheetFromHot cannot re-add tokens like meta-fillable,
+    //    meta-checkbox, YES/NO pair tokens, etc. from the old stored record.
+    const idx = activeSheetIndexRef.current;
+    const sheet = workbookRef.current.sheets[idx];
+    if (sheet?.cellMeta) {
+      sheet.cellMeta = sheet.cellMeta.filter(
+        (m) => !clearKeys.has(cellCoordKey(+m.row, +m.col)),
+      );
+    }
+
+    collectCurrentSheetFromHot(true);
+    scheduleUndoRedoRefresh();
+    hot.render();
+    restoreHotRange(hot, range);
   };
 
   // ─── merge ──────────────────────────────────────────────────────────────────
@@ -2046,6 +2161,10 @@ const HandsontableWorkbook = React.forwardRef<
   );
 
   React.useEffect(() => {
+    if (suppressNextHotReloadRef.current) {
+      suppressNextHotReloadRef.current = false;
+      return;
+    }
     loadSheetIntoHot(activeSheetIndex);
   }, [activeSheetIndex, loadSheetIntoHot, incomingWorkbookKey]);
 
@@ -2068,14 +2187,19 @@ const HandsontableWorkbook = React.forwardRef<
       if (persistedMeta?.type) cp.type = persistedMeta.type;
       if (persistedMeta?.type === "checkbox") {
         cp.type = "checkbox";
-        cp.checkedTemplate = "true";
-        cp.uncheckedTemplate = "";
+        cp.checkedTemplate =
+          persistedMeta.checkedTemplate !== undefined
+            ? persistedMeta.checkedTemplate
+            : "true";
+        cp.uncheckedTemplate =
+          persistedMeta.uncheckedTemplate !== undefined
+            ? persistedMeta.uncheckedTemplate
+            : "";
       }
       if (isYesNoCheckboxCell) {
         cp.type = "checkbox";
-        // Workbook grid is persisted as strings; keep checkbox templates aligned.
-        cp.checkedTemplate = "true";
-        cp.uncheckedTemplate = "";
+        if (cp.checkedTemplate === undefined) cp.checkedTemplate = "YES";
+        if (cp.uncheckedTemplate === undefined) cp.uncheckedTemplate = "NO";
       }
       if (persistedMeta?.dateFormat) cp.dateFormat = persistedMeta.dateFormat;
       if (typeof persistedMeta?.correctFormat === "boolean")
@@ -2099,7 +2223,8 @@ const HandsontableWorkbook = React.forwardRef<
           cellProperties: any,
         ) => {
           if (!td) return td;
-          const isCheckboxCell = String(cellProperties?.type || "") === "checkbox";
+          const isCheckboxCell =
+            String(cellProperties?.type || "") === "checkbox";
           if (isCheckboxCell) {
             checkboxRenderer(
               instance,
@@ -2113,7 +2238,15 @@ const HandsontableWorkbook = React.forwardRef<
             return td;
           }
 
-          textRenderer(instance, td, rowIndex, colIndex, prop, value, cellProperties);
+          textRenderer(
+            instance,
+            td,
+            rowIndex,
+            colIndex,
+            prop,
+            value,
+            cellProperties,
+          );
 
           const cls = String(cellProperties?.className || "");
           const tokens = cls.split(" ").filter(Boolean);
@@ -2515,16 +2648,51 @@ const HandsontableWorkbook = React.forwardRef<
             {selectionLabel}
           </span>
 
-          <TB onClick={undoAction} disabled={!canUndo} title="Undo (Ctrl+Z)">↩</TB>
-          <TB onClick={redoAction} disabled={!canRedo} title="Redo (Ctrl+Y)">↪</TB>
+          <TB onClick={undoAction} disabled={!canUndo} title="Undo (Ctrl+Z)">
+            ↩
+          </TB>
+          <TB onClick={redoAction} disabled={!canRedo} title="Redo (Ctrl+Y)">
+            ↪
+          </TB>
+          <TB
+            onClick={clearSelectedCells}
+            title="Clear selected cells — removes content and all formatting"
+            className="border-red-400 text-red-600 hover:bg-red-50"
+          >
+            Clear Cell
+          </TB>
 
           <span className="mx-1 h-6 border-l" />
 
           {/* Text style */}
-          <TB onClick={() => setFontStyle("bold")} active={isBoldActive} title="Bold (Ctrl+B)"><b>B</b></TB>
-          <TB onClick={() => setFontStyle("italic")} active={isItalicActive} title="Italic (Ctrl+I)"><i>I</i></TB>
-          <TB onClick={() => setFontStyle("underline")} active={isUnderlineActive} title="Underline (Ctrl+U)"><u>U</u></TB>
-          <TB onClick={() => setFontStyle("strike")} active={isStrikeActive} title="Strikethrough"><s>S</s></TB>
+          <TB
+            onClick={() => setFontStyle("bold")}
+            active={isBoldActive}
+            title="Bold (Ctrl+B)"
+          >
+            <b>B</b>
+          </TB>
+          <TB
+            onClick={() => setFontStyle("italic")}
+            active={isItalicActive}
+            title="Italic (Ctrl+I)"
+          >
+            <i>I</i>
+          </TB>
+          <TB
+            onClick={() => setFontStyle("underline")}
+            active={isUnderlineActive}
+            title="Underline (Ctrl+U)"
+          >
+            <u>U</u>
+          </TB>
+          <TB
+            onClick={() => setFontStyle("strike")}
+            active={isStrikeActive}
+            title="Strikethrough"
+          >
+            <s>S</s>
+          </TB>
 
           {/* Font family — auto-applies on change */}
           <select
@@ -2663,29 +2831,72 @@ const HandsontableWorkbook = React.forwardRef<
 
           <span className="mx-1 h-6 border-l" />
 
-          <TB onClick={mergeSelection} title="Merge selected cells">⊞ Merge</TB>
-          <TB onClick={unmergeSelection} title="Unmerge selected cells">⊟ Split</TB>
+          <TB onClick={mergeSelection} title="Merge selected cells">
+            ⊞ Merge
+          </TB>
+          <TB onClick={unmergeSelection} title="Unmerge selected cells">
+            ⊟ Split
+          </TB>
 
           <span className="mx-1 h-6 border-l" />
 
           {/* Row / column operations */}
-          <TB onClick={() => alterBySelection("insert_row_above")} title="Insert row above selection">↑ Row</TB>
-          <TB onClick={() => alterBySelection("insert_row_below")} title="Insert row below selection">↓ Row</TB>
-          <TB onClick={() => alterBySelection("insert_col_start")} title="Insert column to the left">← Col</TB>
-          <TB onClick={() => alterBySelection("insert_col_end")} title="Insert column to the right">→ Col</TB>
-          <TB onClick={() => alterBySelection("remove_row")} title="Delete selected rows">✕ Row</TB>
-          <TB onClick={() => alterBySelection("remove_col")} title="Delete selected columns">✕ Col</TB>
+          <TB
+            onClick={() => alterBySelection("insert_row_above")}
+            title="Insert row above selection"
+          >
+            ↑ Row
+          </TB>
+          <TB
+            onClick={() => alterBySelection("insert_row_below")}
+            title="Insert row below selection"
+          >
+            ↓ Row
+          </TB>
+          <TB
+            onClick={() => alterBySelection("insert_col_start")}
+            title="Insert column to the left"
+          >
+            ← Col
+          </TB>
+          <TB
+            onClick={() => alterBySelection("insert_col_end")}
+            title="Insert column to the right"
+          >
+            → Col
+          </TB>
+          <TB
+            onClick={() => alterBySelection("remove_row")}
+            title="Delete selected rows"
+          >
+            ✕ Row
+          </TB>
+          <TB
+            onClick={() => alterBySelection("remove_col")}
+            title="Delete selected columns"
+          >
+            ✕ Col
+          </TB>
 
           <span className="mx-1 h-6 border-l" />
 
           {/* Percent format */}
-          <TB onClick={() => formatSelectedAs("percent")} title="Format selection as percentage (0.00%)">%</TB>
+          <TB
+            onClick={() => formatSelectedAs("percent")}
+            title="Format selection as percentage (0.00%)"
+          >
+            %
+          </TB>
 
           <span className="mx-1 h-6 border-l" />
 
           {/* Export */}
-          <TB onClick={exportXlsx} title="Export workbook as Excel (.xlsx)">↓ xlsx</TB>
-          <TB onClick={exportCsv} title="Export active sheet as CSV">↓ csv</TB>
+          <TB onClick={exportXlsx} title="Export workbook as Excel (.xlsx)">
+            ↓ xlsx
+          </TB>
+          <TB onClick={exportCsv} title="Export active sheet as CSV">
+            ↓ csv
+          </TB>
         </div>
       )}
 
@@ -2854,9 +3065,15 @@ const HandsontableWorkbook = React.forwardRef<
               + Add Sheet
             </Button>
 
-            <TB onClick={duplicateActiveSheet} title="Duplicate active sheet">⧉ Duplicate</TB>
-            <TB onClick={() => moveSheet("left")} title="Move sheet left">← Move</TB>
-            <TB onClick={() => moveSheet("right")} title="Move sheet right">Move →</TB>
+            <TB onClick={duplicateActiveSheet} title="Duplicate active sheet">
+              ⧉ Duplicate
+            </TB>
+            <TB onClick={() => moveSheet("left")} title="Move sheet left">
+              ← Move
+            </TB>
+            <TB onClick={() => moveSheet("right")} title="Move sheet right">
+              Move →
+            </TB>
 
             <input
               type="color"
@@ -2897,63 +3114,63 @@ const HandsontableWorkbook = React.forwardRef<
       >
         <div style={hotTableScaleStyle}>
           <HotTable
-          /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
-           * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
-           * leak onto another at the same coordinates. */
-          key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
-          ref={hotRef}
-          data={initialGrid}
-          themeName="ht-theme-main"
-          rowHeaders
-          colHeaders
-          licenseKey="non-commercial-and-evaluation"
-          readOnly={false}
-          trimWhitespace={false}
-          width="100%"
-          stretchH={stretchColumnsInPreview ? "all" : "none"}
-          height={readOnly ? (readOnlyHotHeight ?? 380) : 320}
-          formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
-          mergeCells={
-            renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly
-          }
-          filters={!readOnly}
-          dropdownMenu={!readOnly}
-          columnSorting={!readOnly}
-          {...(!readOnly
-            ? {
-                hiddenRows: { indicators: true } as const,
-                hiddenColumns: { indicators: true } as const,
-              }
-            : {})}
-          multiColumnSorting={!readOnly}
-          manualColumnFreeze={!readOnly}
-          autoColumnSize={false}
-          autoRowSize={false}
-          fillHandle={!readOnly}
-          fixedRowsTop={0}
-          fixedColumnsStart={0}
-          contextMenu={hotTableContextMenu}
-          className="ht-theme-main"
-          manualRowResize={!readOnly}
-          manualColumnResize={!readOnly}
-          colWidths={renderedColWidths as any}
-          rowHeights={renderedRowHeights as any}
-          wordWrap
-          autoWrapRow
-          autoWrapCol
-          cells={cellsCallback}
-          afterGetCellMeta={afterGetCellMeta}
-          afterColumnResize={afterColumnResize}
-          afterRowResize={afterRowResize}
-          afterChange={afterChange}
-          afterSelection={afterSelection}
-          afterSelectionEnd={afterSelectionEnd}
-          afterMergeCells={afterMergeCells}
-          afterUnmergeCells={afterUnmergeCells}
-          afterCreateRow={afterCreateRow}
-          afterCreateCol={afterCreateCol}
-          afterRemoveRow={afterRemoveRow}
-          afterRemoveCol={afterRemoveCol}
+            /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
+             * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
+             * leak onto another at the same coordinates. */
+            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            ref={hotRef}
+            data={initialGrid}
+            themeName="ht-theme-main"
+            rowHeaders
+            colHeaders
+            licenseKey="non-commercial-and-evaluation"
+            readOnly={false}
+            trimWhitespace={false}
+            width="100%"
+            stretchH={stretchColumnsInPreview ? "all" : "none"}
+            height={readOnly ? (readOnlyHotHeight ?? 380) : 320}
+            formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
+            mergeCells={
+              renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly
+            }
+            filters={!readOnly}
+            dropdownMenu={!readOnly}
+            columnSorting={!readOnly}
+            {...(!readOnly
+              ? {
+                  hiddenRows: { indicators: true } as const,
+                  hiddenColumns: { indicators: true } as const,
+                }
+              : {})}
+            multiColumnSorting={!readOnly}
+            manualColumnFreeze={!readOnly}
+            autoColumnSize={false}
+            autoRowSize={false}
+            fillHandle={!readOnly}
+            fixedRowsTop={0}
+            fixedColumnsStart={0}
+            contextMenu={hotTableContextMenu}
+            className="ht-theme-main"
+            manualRowResize={!readOnly}
+            manualColumnResize={!readOnly}
+            colWidths={renderedColWidths as any}
+            rowHeights={renderedRowHeights as any}
+            wordWrap
+            autoWrapRow
+            autoWrapCol
+            cells={cellsCallback}
+            afterGetCellMeta={afterGetCellMeta}
+            afterColumnResize={afterColumnResize}
+            afterRowResize={afterRowResize}
+            afterChange={afterChange}
+            afterSelection={afterSelection}
+            afterSelectionEnd={afterSelectionEnd}
+            afterMergeCells={afterMergeCells}
+            afterUnmergeCells={afterUnmergeCells}
+            afterCreateRow={afterCreateRow}
+            afterCreateCol={afterCreateCol}
+            afterRemoveRow={afterRemoveRow}
+            afterRemoveCol={afterRemoveCol}
           />
         </div>
       </div>
