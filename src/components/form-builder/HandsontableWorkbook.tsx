@@ -528,6 +528,63 @@ const toRangeLabel = (
 // Prevent toolbar buttons from stealing focus from the grid
 const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 
+const SINGLE_CHECKBOX_CLASS = "meta-single-checkbox";
+
+type ToolbarButtonProps = {
+  onClick: () => void;
+  children: React.ReactNode;
+  title?: string;
+  variant?: "outline" | "default";
+  disabled?: boolean;
+  active?: boolean;
+  className?: string;
+};
+
+const TB = ({
+  onClick,
+  children,
+  title,
+  variant = "outline",
+  disabled = false,
+  active = false,
+  className = "",
+}: ToolbarButtonProps) => (
+  <Button
+    type="button"
+    size="sm"
+    variant={active ? "default" : variant}
+    disabled={disabled}
+    title={title}
+    className={className}
+    onMouseDown={noFocusSteal}
+    onClick={onClick}
+  >
+    {children}
+  </Button>
+);
+
+const buildYesNoOppositeMap = (
+  cellMeta?: NonNullable<SheetData["cellMeta"]>,
+) => {
+  const pairBuckets = new Map<string, Array<{ row: number; col: number }>>();
+  for (const meta of cellMeta || []) {
+    const pairToken = extractYesNoPairToken(meta.className);
+    if (!pairToken) continue;
+    const list = pairBuckets.get(pairToken) || [];
+    list.push({ row: meta.row, col: meta.col });
+    pairBuckets.set(pairToken, list);
+  }
+  const oppositeCellByKey = new Map<string, { row: number; col: number }>();
+  for (const entries of pairBuckets.values()) {
+    if (entries.length !== 2) continue;
+    const a = entries[0];
+    const b = entries[1];
+    oppositeCellByKey.set(cellCoordKey(a.row, a.col), b);
+    oppositeCellByKey.set(cellCoordKey(b.row, b.col), a);
+  }
+  return oppositeCellByKey;
+};
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const HandsontableWorkbook = React.forwardRef<
@@ -608,6 +665,8 @@ const HandsontableWorkbook = React.forwardRef<
   >({});
 
   const hotRef = React.useRef<any>(null);
+  const hotViewportRef = React.useRef<HTMLDivElement | null>(null);
+  const [hotViewportWidth, setHotViewportWidth] = React.useState(0);
 
   const textColorApplyTimerRef = React.useRef<ReturnType<
     typeof setTimeout
@@ -615,6 +674,13 @@ const HandsontableWorkbook = React.forwardRef<
   const fillColorApplyTimerRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const undoRedoRefreshTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const formulaCellSetRef = React.useRef<Set<string>>(new Set());
+  const yesNoOppositeCellMapRef = React.useRef<
+    Map<string, { row: number; col: number }>
+  >(new Map());
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -680,9 +746,61 @@ const HandsontableWorkbook = React.forwardRef<
     (!Array.isArray(activeSheet.colWidthsPx) ||
       activeSheet.colWidthsPx.length === 0);
 
-  const currentCellCount = renderedGrid.reduce(
-    (t, row) => t + (Array.isArray(row) ? row.length : 0),
-    0,
+  React.useEffect(() => {
+    const el = hotViewportRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const width = entries?.[0]?.contentRect?.width ?? 0;
+      setHotViewportWidth(width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const hotTableZoom = React.useMemo(() => {
+    if (hotViewportWidth <= 0) return 1;
+    const colCount = renderedGrid.reduce(
+      (max, row) => Math.max(max, Array.isArray(row) ? row.length : 0),
+      0,
+    );
+    if (colCount <= 0) return 1;
+    const measuredWidths = Array.isArray(renderedColWidths)
+      ? renderedColWidths
+      : [];
+    const widthSample = Math.min(colCount, measuredWidths.length);
+    const sampledWidth = measuredWidths
+      .slice(0, widthSample)
+      .reduce((sum, w) => sum + Math.max(24, Number(w) || 80), 0);
+    const estimatedAvgWidth =
+      widthSample > 0 ? sampledWidth / widthSample : 80;
+    const visibleColsAt100 = Math.floor(hotViewportWidth / estimatedAvgWidth);
+    const overflowAt100 = colCount - visibleColsAt100;
+    // Only zoom when sheet is truly wide; keep normal files at 100%.
+    if (overflowAt100 <= 2) return 1;
+    // For very wide sheets, aim for near-zero overflow so most columns are visible.
+    const targetOverflowCols = overflowAt100 > 12 ? 0 : 1;
+    const targetVisibleCols = Math.max(1, colCount - targetOverflowCols);
+    const targetScale =
+      hotViewportWidth / Math.max(1, targetVisibleCols * estimatedAvgWidth);
+    return Math.max(0.5, Math.min(1, targetScale));
+  }, [hotViewportWidth, renderedGrid, renderedColWidths]);
+
+  const hotTableScaleStyle = React.useMemo<React.CSSProperties>(() => {
+    if (hotTableZoom >= 0.999) return {};
+    return {
+      transform: `scaleX(${hotTableZoom})`,
+      transformOrigin: "top left",
+      width: `${100 / hotTableZoom}%`,
+    };
+  }, [hotTableZoom]);
+
+  const currentCellCount = React.useMemo(
+    () =>
+      renderedGrid.reduce(
+        (t, row) => t + (Array.isArray(row) ? row.length : 0),
+        0,
+      ),
+    [renderedGrid],
   );
   // Keep formulas active in preview/runtime mode too, otherwise dependent cells
   // never recalculate when users edit fillable inputs.
@@ -850,6 +968,16 @@ const HandsontableWorkbook = React.forwardRef<
     setCanUndo(Boolean(ur?.isUndoAvailable?.()));
     setCanRedo(Boolean(ur?.isRedoAvailable?.()));
   }, []);
+
+  const scheduleUndoRedoRefresh = React.useCallback(() => {
+    if (undoRedoRefreshTimerRef.current) {
+      clearTimeout(undoRedoRefreshTimerRef.current);
+    }
+    undoRedoRefreshTimerRef.current = setTimeout(() => {
+      undoRedoRefreshTimerRef.current = null;
+      refreshUndoRedoState();
+    }, 300);
+  }, [refreshUndoRedoState]);
 
   const syncToolbarFromCell = React.useCallback(
     (hot: any, row: number, col: number) => {
@@ -1136,7 +1264,33 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+
+      // Save the HOT grid's pixel scroll position before loadData resets it.
+      // hot.loadData() always resets the viewport to (0,0), and the HotTable
+      // React component calls it a second time when it detects a new `data`
+      // prop — that second call wipes out any hot.selectCell() scroll
+      // restoration. We capture the position here and restore it via double-rAF
+      // so it lands after both loadData calls have settled.
+      const masterHolder = hot.rootElement?.querySelector?.(
+        ".wtHolder",
+      ) as HTMLElement | null;
+      const savedScrollTop = masterHolder?.scrollTop ?? 0;
+      const savedScrollLeft = masterHolder?.scrollLeft ?? 0;
+
       const visibleGrid = toVisibleGrid(sheet);
+      const formulaSet = new Set<string>();
+      for (let r = 0; r < visibleGrid.length; r++) {
+        const row = visibleGrid[r];
+        if (!Array.isArray(row)) continue;
+        for (let c = 0; c < row.length; c++) {
+          const cell = row[c];
+          if (typeof cell === "string" && cell.startsWith("=")) {
+            formulaSet.add(cellCoordKey(r, c));
+          }
+        }
+      }
+      formulaCellSetRef.current = formulaSet;
+      yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
       if (!readOnly) {
@@ -1191,6 +1345,24 @@ const HandsontableWorkbook = React.forwardRef<
       lastSelectionRef.current = nextRange;
       sheetSelectionRef.current[targetIndex] = nextRange;
       setSelectionLabel(toRangeLabel(nextRange));
+
+      // Restore scroll after React's HotTable re-render (which triggers a
+      // second internal loadData when it detects the new `data` prop).
+      // Only restore if the sheet didn't change (user was already on this tab).
+      if (savedScrollTop > 0 || savedScrollLeft > 0) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const h = hotRef.current?.hotInstance;
+            const holder = h?.rootElement?.querySelector?.(
+              ".wtHolder",
+            ) as HTMLElement | null;
+            if (holder) {
+              holder.scrollTop = savedScrollTop;
+              holder.scrollLeft = savedScrollLeft;
+            }
+          });
+        });
+      }
     },
     [readOnly, toVisibleGrid],
   );
@@ -1280,6 +1452,9 @@ const HandsontableWorkbook = React.forwardRef<
   React.useEffect(
     () => () => {
       flushPendingColorTimers();
+      if (undoRedoRefreshTimerRef.current) {
+        clearTimeout(undoRedoRefreshTimerRef.current);
+      }
     },
     [flushPendingColorTimers],
   );
@@ -1367,6 +1542,16 @@ const HandsontableWorkbook = React.forwardRef<
   const setYesNoToggle = () => {
     const hot = hotRef.current?.hotInstance;
     if (!hot || readOnly) return;
+    const root = hot.rootElement as HTMLElement | undefined;
+    const container =
+      root?.closest('[role="dialog"]') ??
+      root?.closest(
+        ".overflow-y-auto, .overflow-auto, [data-radix-scroll-area-viewport]",
+      ) ??
+      document.documentElement;
+    const savedScrollTop = (container as HTMLElement)?.scrollTop ?? window.scrollY;
+    const savedScrollLeft =
+      (container as HTMLElement)?.scrollLeft ?? window.scrollX;
     const range = getToolbarActionRange(hot);
     if (!range) return;
     const idx = activeSheetIndexRef.current;
@@ -1430,6 +1615,80 @@ const HandsontableWorkbook = React.forwardRef<
     if (sheet) {
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
+      yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
+    }
+    collectCurrentSheetFromHot(true);
+    emitWorkbookToParent();
+    restoreHotRange(hot, range);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (container && container !== document.documentElement) {
+          (container as HTMLElement).scrollTop = savedScrollTop;
+          (container as HTMLElement).scrollLeft = savedScrollLeft;
+        } else {
+          window.scrollTo(savedScrollLeft, savedScrollTop);
+        }
+      });
+    });
+  };
+
+  const setSingleCheckbox = () => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot || readOnly) return;
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
+    const idx = activeSheetIndexRef.current;
+    const sheet = workbookRef.current.sheets[idx];
+    const metaByKey = new Map<
+      string,
+      NonNullable<SheetData["cellMeta"]>[number]
+    >();
+    for (const meta of sheet?.cellMeta || []) {
+      metaByKey.set(cellCoordKey(meta.row, meta.col), { ...meta });
+    }
+
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (let c = range.startCol; c <= range.endCol; c++) {
+        hot.setCellMeta(r, c, "type", "checkbox");
+        hot.setCellMeta(r, c, "checkedTemplate", "true");
+        hot.setCellMeta(r, c, "uncheckedTemplate", "false");
+        const val = hot.getDataAtCell(r, c);
+        if (val !== "true" && val !== "false" && val !== true && val !== false) {
+          hot.setDataAtCell(r, c, "false");
+        }
+        const key = cellCoordKey(r, c);
+        const existing = metaByKey.get(key);
+        const classTokens = String(existing?.className || "")
+          .split(/\s+/)
+          .filter(
+            (t) =>
+              Boolean(t) &&
+              !t.startsWith(YES_NO_PAIR_TOKEN_PREFIX) &&
+              t !== SINGLE_CHECKBOX_CLASS,
+          );
+        const newClassName = [...classTokens, SINGLE_CHECKBOX_CLASS]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        hot.setCellMeta(r, c, "className", newClassName);
+        metaByKey.set(key, {
+          row: r,
+          col: c,
+          className: newClassName || undefined,
+          type: "checkbox",
+          dateFormat: existing?.dateFormat,
+          correctFormat: existing?.correctFormat,
+          numericFormat: existing?.numericFormat,
+          source: existing?.source,
+          strict: existing?.strict,
+        });
+      }
+    }
+
+    if (sheet) {
+      sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
+      workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
+      yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
     }
     collectCurrentSheetFromHot(true);
     emitWorkbookToParent();
@@ -1956,9 +2215,7 @@ const HandsontableWorkbook = React.forwardRef<
         return;
       }
       // Formula cells must stay writable for HyperFormula recalculation updates.
-      const hot = hotRef.current?.hotInstance;
-      const cellValue = hot?.getSourceDataAtCell?.(row, col);
-      if (typeof cellValue === "string" && cellValue.startsWith("=")) {
+      if (formulaCellSetRef.current.has(cellCoordKey(row, col))) {
         (cellProps as { readOnly?: boolean }).readOnly = false;
         return;
       }
@@ -1971,38 +2228,242 @@ const HandsontableWorkbook = React.forwardRef<
     [readOnly, fillableCellSet],
   );
 
-  // ─── Toolbar button wrapper — prevents focus loss ─────────────────────────
+  const afterColumnResize = React.useCallback(() => {
+    flushLayoutToParent();
+  }, [flushLayoutToParent]);
 
-  const TB = ({
-    onClick,
-    children,
-    title,
-    variant = "outline",
-    disabled = false,
-    active = false,
-    className = "",
-  }: {
-    onClick: () => void;
-    children: React.ReactNode;
-    title?: string;
-    variant?: "outline" | "default";
-    disabled?: boolean;
-    active?: boolean;
-    className?: string;
-  }) => (
-    <Button
-      type="button"
-      size="sm"
-      variant={active ? "default" : variant}
-      disabled={disabled}
-      title={title}
-      className={className}
-      onMouseDown={noFocusSteal} // ← THE KEY FIX: keeps grid focused
-      onClick={onClick}
-    >
-      {children}
-    </Button>
+  const afterRowResize = React.useCallback(() => {
+    flushLayoutToParent();
+  }, [flushLayoutToParent]);
+
+  const afterMergeCells = React.useCallback(() => {
+    if (!readOnly) {
+      collectCurrentSheetFromHot(true);
+      scheduleUndoRedoRefresh();
+    }
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+
+  const afterUnmergeCells = React.useCallback(() => {
+    if (!readOnly) {
+      collectCurrentSheetFromHot(true);
+      scheduleUndoRedoRefresh();
+    }
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+
+  const afterCreateRow = React.useCallback(() => {
+    scheduleUndoRedoRefresh();
+  }, [scheduleUndoRedoRefresh]);
+
+  const afterCreateCol = React.useCallback(() => {
+    scheduleUndoRedoRefresh();
+  }, [scheduleUndoRedoRefresh]);
+
+  const afterRemoveRow = React.useCallback(() => {
+    scheduleUndoRedoRefresh();
+  }, [scheduleUndoRedoRefresh]);
+
+  const afterRemoveCol = React.useCallback(() => {
+    scheduleUndoRedoRefresh();
+  }, [scheduleUndoRedoRefresh]);
+
+  const afterChange = React.useCallback(
+    (changes: any, source: string) => {
+      if (
+        Array.isArray(changes) &&
+        changes.length > 0 &&
+        source !== "loadData" &&
+        source !== "updateData" &&
+        String(source) !== "yesNoSync"
+      ) {
+        const hot = hotRef.current?.hotInstance;
+        if (hot) {
+          const oppositeCellByKey = yesNoOppositeCellMapRef.current;
+          for (const [row, col, , newValue] of changes as [
+            number,
+            number,
+            unknown,
+            unknown,
+          ][]) {
+            if (!Number.isFinite(row) || !Number.isFinite(col)) continue;
+            const key = cellCoordKey(row, col);
+            const opposite = oppositeCellByKey.get(key);
+            if (!opposite || !toCheckboxChecked(newValue)) continue;
+            const _hot = hot;
+            const _opp = opposite;
+            setTimeout(() => {
+              _hot.setDataAtCell(_opp.row, _opp.col, "false", "yesNoSync");
+            }, 0);
+          }
+        }
+      }
+      if (!readOnly && Array.isArray(changes) && changes.length > 0) {
+        scheduleUndoRedoRefresh();
+      }
+      if (
+        readOnly &&
+        changes &&
+        source !== "loadData" &&
+        source !== "updateData"
+      ) {
+        const idx = activeSheetIndexRef.current;
+        const sheet = workbookRef.current.sheets[idx];
+        if (!sheet) return;
+        const baseGrid = sheet.grid;
+        let newGrid: string[][] = baseGrid;
+        const clonedRows = new Set<number>();
+        for (const [row, col, , newValue] of changes as [
+          number,
+          number,
+          unknown,
+          unknown,
+        ][]) {
+          if (
+            typeof row !== "number" ||
+            typeof col !== "number" ||
+            !Array.isArray(baseGrid[row])
+          )
+            continue;
+          if (newGrid === baseGrid) newGrid = [...baseGrid];
+          if (!clonedRows.has(row)) {
+            newGrid[row] = [...baseGrid[row]];
+            clonedRows.add(row);
+          }
+          newGrid[row][col] = newValue == null ? "" : String(newValue);
+        }
+        if (newGrid !== baseGrid) {
+          workbookRef.current.sheets[idx] = {
+            ...sheet,
+            grid: newGrid,
+          };
+          readOnlyPreviewDirtyRef.current = true;
+        }
+      }
+    },
+    [readOnly, scheduleUndoRedoRefresh],
   );
+
+  const afterSelection = React.useCallback(
+    (r: number, c: number, r2: number, c2: number) => {
+      const hot = hotRef.current?.hotInstance;
+      const rowCount =
+        typeof hot?.countRows === "function"
+          ? Math.max(1, hot.countRows())
+          : Math.max(1, safeGrid.length);
+      const colCount =
+        typeof hot?.countCols === "function"
+          ? Math.max(1, hot.countCols())
+          : Math.max(1, safeGrid[0]?.length || 1);
+
+      if (!Number.isInteger(r) || !Number.isInteger(c)) return;
+      const endRowRaw = Number.isInteger(r2) ? r2 : r;
+      const endColRaw = Number.isInteger(c2) ? c2 : c;
+      const startRowRaw = r < 0 ? 0 : r;
+      const endRowNormalized = endRowRaw < 0 ? rowCount - 1 : endRowRaw;
+      const startColRaw = c < 0 ? 0 : c;
+      const endColNormalized = endColRaw < 0 ? colCount - 1 : endColRaw;
+      const range = {
+        startRow: Math.max(0, Math.min(startRowRaw, endRowNormalized)),
+        endRow: Math.min(rowCount - 1, Math.max(startRowRaw, endRowNormalized)),
+        startCol: Math.max(0, Math.min(startColRaw, endColNormalized)),
+        endCol: Math.min(colCount - 1, Math.max(startColRaw, endColNormalized)),
+      };
+      lastSelectionRef.current = range;
+      sheetSelectionRef.current[activeSheetIndexRef.current] = range;
+      if (!readOnly) setSelectionLabel(toRangeLabel(range));
+    },
+    [readOnly, safeGrid],
+  );
+
+  const afterSelectionEnd = React.useCallback(
+    (r: number, c: number, r2: number, c2: number) => {
+      const hot = hotRef.current?.hotInstance;
+      if (!hot || !Number.isInteger(r) || !Number.isInteger(c)) return;
+      const rowCount =
+        typeof hot.countRows === "function"
+          ? Math.max(1, hot.countRows())
+          : Math.max(1, safeGrid.length);
+      const colCount =
+        typeof hot.countCols === "function"
+          ? Math.max(1, hot.countCols())
+          : Math.max(1, safeGrid[0]?.length || 1);
+      const endRowRaw = Number.isInteger(r2) ? r2 : r;
+      const endColRaw = Number.isInteger(c2) ? c2 : c;
+      const startRowRaw = r < 0 ? 0 : r;
+      const endRowNormalized = endRowRaw < 0 ? rowCount - 1 : endRowRaw;
+      const startColRaw = c < 0 ? 0 : c;
+      const endColNormalized = endColRaw < 0 ? colCount - 1 : endColRaw;
+      const range = {
+        startRow: Math.max(0, Math.min(startRowRaw, endRowNormalized)),
+        endRow: Math.min(rowCount - 1, Math.max(startRowRaw, endRowNormalized)),
+        startCol: Math.max(0, Math.min(startColRaw, endColNormalized)),
+        endCol: Math.min(colCount - 1, Math.max(startColRaw, endColNormalized)),
+      };
+      lastSelectionRef.current = range;
+      sheetSelectionRef.current[activeSheetIndexRef.current] = range;
+
+      if (readOnly) {
+        const root = hot.rootElement as HTMLElement | undefined;
+        const container =
+          root?.closest('[role="dialog"]') ??
+          root?.closest(
+            "[data-radix-scroll-area-viewport], .overflow-y-auto, .overflow-auto",
+          ) ??
+          document.documentElement;
+        const savedTop = (container as HTMLElement)?.scrollTop ?? 0;
+        const savedLeft = (container as HTMLElement)?.scrollLeft ?? 0;
+        setSelectionLabel(toRangeLabel(range));
+        const v = hot.getDataAtCell(range.startRow, range.startCol);
+        setFormulaInput(v == null ? "" : String(v));
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (container && container !== document.documentElement) {
+              (container as HTMLElement).scrollTop = savedTop;
+              (container as HTMLElement).scrollLeft = savedLeft;
+            } else {
+              window.scrollTo(savedLeft, savedTop);
+            }
+          });
+        });
+        return;
+      }
+      setSelectionLabel(toRangeLabel(range));
+      syncToolbarFromCell(hot, range.startRow, range.startCol);
+    },
+    [readOnly, safeGrid, syncToolbarFromCell],
+  );
+
+  const hotTableContextMenu = React.useMemo<any>(() => {
+    if (readOnly) return false;
+    return {
+      items: {
+        row_above: {},
+        row_below: {},
+        col_left: {},
+        col_right: {},
+        hsep1: "---------",
+        remove_row: {},
+        remove_col: {},
+        hidden_rows_hide: {},
+        hidden_rows_show: {},
+        hidden_columns_hide: {},
+        hidden_columns_show: {},
+        hsep2: "---------",
+        mergeCells: {},
+        hsep3: "---------",
+        alignment: {},
+        row_height: {},
+        col_width: {},
+        freeze_column: {},
+        unfreeze_column: {},
+        hsep4: "---------",
+        copy: {},
+        cut: {},
+        hsep5: "---------",
+        undo: {},
+        redo: {},
+      },
+    };
+  }, [readOnly]);
 
   // ─── render ──────────────────────────────────────────────────────────────────
 
@@ -2406,6 +2867,12 @@ const HandsontableWorkbook = React.forwardRef<
               ☑ YES/NO
             </TB>
             <TB
+              onClick={setSingleCheckbox}
+              title="Insert a standalone checkbox in each selected cell"
+            >
+              ☑ Checkbox
+            </TB>
+            <TB
               onClick={toggleFillableSelection}
               title="Mark selected cells as fillable in Preview/runtime mode"
             >
@@ -2416,8 +2883,12 @@ const HandsontableWorkbook = React.forwardRef<
       </div>
 
       {/* ── Grid ── */}
-      <div className="relative z-0 overflow-hidden border rounded-md">
-        <HotTable
+      <div
+        ref={hotViewportRef}
+        className="relative z-0 overflow-hidden border rounded-md"
+      >
+        <div style={hotTableScaleStyle}>
+          <HotTable
           /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
            * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
            * leak onto another at the same coordinates. */
@@ -2453,39 +2924,7 @@ const HandsontableWorkbook = React.forwardRef<
           fillHandle={!readOnly}
           fixedRowsTop={0}
           fixedColumnsStart={0}
-          contextMenu={
-            readOnly
-              ? false
-              : {
-                  items: {
-                    row_above: {},
-                    row_below: {},
-                    col_left: {},
-                    col_right: {},
-                    hsep1: "---------",
-                    remove_row: {},
-                    remove_col: {},
-                    hidden_rows_hide: {},
-                    hidden_rows_show: {},
-                    hidden_columns_hide: {},
-                    hidden_columns_show: {},
-                    hsep2: "---------",
-                    mergeCells: {},
-                    hsep3: "---------",
-                    alignment: {},
-                    row_height: {},
-                    col_width: {},
-                    freeze_column: {},
-                    unfreeze_column: {},
-                    hsep4: "---------",
-                    copy: {},
-                    cut: {},
-                    hsep5: "---------",
-                    undo: {},
-                    redo: {},
-                  },
-                }
-          }
+          contextMenu={hotTableContextMenu}
           className="ht-theme-main"
           manualRowResize={!readOnly}
           manualColumnResize={!readOnly}
@@ -2496,249 +2935,19 @@ const HandsontableWorkbook = React.forwardRef<
           autoWrapCol
           cells={cellsCallback}
           afterGetCellMeta={afterGetCellMeta}
-          afterColumnResize={() => flushLayoutToParent()}
-          afterRowResize={() => flushLayoutToParent()}
-          afterChange={(changes, source) => {
-            if (
-              Array.isArray(changes) &&
-              changes.length > 0 &&
-              source !== "loadData" &&
-              source !== "updateData" &&
-              String(source) !== "yesNoSync"
-            ) {
-              const hot = hotRef.current?.hotInstance;
-              const sheet =
-                workbookRef.current.sheets[activeSheetIndexRef.current];
-              if (hot && sheet?.cellMeta?.length) {
-                const pairBuckets = new Map<
-                  string,
-                  Array<{ row: number; col: number }>
-                >();
-                for (const meta of sheet.cellMeta) {
-                  const pairToken = extractYesNoPairToken(meta.className);
-                  if (!pairToken) continue;
-                  const list = pairBuckets.get(pairToken) || [];
-                  list.push({ row: meta.row, col: meta.col });
-                  pairBuckets.set(pairToken, list);
-                }
-
-                const oppositeCellByKey = new Map<
-                  string,
-                  { row: number; col: number }
-                >();
-                for (const entries of pairBuckets.values()) {
-                  if (entries.length !== 2) continue;
-                  const a = entries[0];
-                  const b = entries[1];
-                  oppositeCellByKey.set(cellCoordKey(a.row, a.col), b);
-                  oppositeCellByKey.set(cellCoordKey(b.row, b.col), a);
-                }
-
-                const pairTokenByCoord = new Map<string, string>();
-                for (const meta of sheet.cellMeta) {
-                  const pairToken = extractYesNoPairToken(meta.className);
-                  if (!pairToken) continue;
-                  pairTokenByCoord.set(cellCoordKey(meta.row, meta.col), pairToken);
-                }
-
-                for (const [row, col, , newValue] of changes as [
-                  number,
-                  number,
-                  unknown,
-                  unknown,
-                ][]) {
-                  if (!Number.isFinite(row) || !Number.isFinite(col)) continue;
-                  const key = cellCoordKey(row, col);
-                  if (!pairTokenByCoord.has(key)) continue;
-                  if (!toCheckboxChecked(newValue)) continue;
-                  const opposite = oppositeCellByKey.get(key);
-                  if (!opposite) continue;
-                  // Defer the write so it runs outside the current afterChange
-                  // call stack — calling setDataAtCell re-entrantly inside
-                  // afterChange causes a crash in Handsontable 17.
-                  const _hot = hot;
-                  const _opp = opposite;
-                  setTimeout(() => {
-                    _hot.setDataAtCell(
-                      _opp.row,
-                      _opp.col,
-                      "false",
-                      "yesNoSync",
-                    );
-                  }, 0);
-                }
-              }
-            }
-
-            // Preview (`readOnly`): never call undo/redo setState here — it runs on every
-            // keystroke and re-renders the HotTable wrapper, which closes the editor and drops input.
-            if (!readOnly && Array.isArray(changes) && changes.length > 0) {
-              refreshUndoRedoState();
-            }
-            if (
-              readOnly &&
-              changes &&
-              source !== "loadData" &&
-              source !== "updateData"
-            ) {
-              const idx = activeSheetIndexRef.current;
-              const sheet = workbookRef.current.sheets[idx];
-              if (!sheet) return;
-              const baseGrid = sheet.grid;
-              let newGrid: string[][] = baseGrid;
-              for (const [row, col, , newValue] of changes as [
-                number,
-                number,
-                unknown,
-                unknown,
-              ][]) {
-                if (
-                  typeof row !== "number" ||
-                  typeof col !== "number" ||
-                  !baseGrid[row]
-                )
-                  continue;
-                if (newGrid === baseGrid) {
-                  newGrid = baseGrid.map((r, ri) =>
-                    ri === row ? [...r] : r,
-                  ) as string[][];
-                } else if (newGrid[row] === baseGrid[row]) {
-                  newGrid[row] = [...baseGrid[row]];
-                }
-                newGrid[row][col] = newValue == null ? "" : String(newValue);
-              }
-              if (newGrid !== baseGrid) {
-                workbookRef.current.sheets[idx] = {
-                  ...sheet,
-                  grid: newGrid,
-                };
-                readOnlyPreviewDirtyRef.current = true;
-              }
-            }
-          }}
-          afterSelection={(r, c, r2, c2) => {
-            const hot = hotRef.current?.hotInstance;
-            const rowCount =
-              typeof hot?.countRows === "function"
-                ? Math.max(1, hot.countRows())
-                : Math.max(1, safeGrid.length);
-            const colCount =
-              typeof hot?.countCols === "function"
-                ? Math.max(1, hot.countCols())
-                : Math.max(1, safeGrid[0]?.length || 1);
-
-            if (!Number.isInteger(r) || !Number.isInteger(c)) return;
-            const endRowRaw = Number.isInteger(r2) ? r2 : r;
-            const endColRaw = Number.isInteger(c2) ? c2 : c;
-
-            // HOT uses -1 for header selections. Normalize to full row/col ranges.
-            const startRowRaw = r < 0 ? 0 : r;
-            const endRowNormalized = endRowRaw < 0 ? rowCount - 1 : endRowRaw;
-            const startColRaw = c < 0 ? 0 : c;
-            const endColNormalized = endColRaw < 0 ? colCount - 1 : endColRaw;
-            const range = {
-              startRow: Math.max(0, Math.min(startRowRaw, endRowNormalized)),
-              endRow: Math.min(
-                rowCount - 1,
-                Math.max(startRowRaw, endRowNormalized),
-              ),
-              startCol: Math.max(0, Math.min(startColRaw, endColNormalized)),
-              endCol: Math.min(
-                colCount - 1,
-                Math.max(startColRaw, endColNormalized),
-              ),
-            };
-            lastSelectionRef.current = range;
-            sheetSelectionRef.current[activeSheetIndexRef.current] = range;
-            // Preview: never setState here — Handsontable can fire `afterSelection` while the
-            // cell editor is open; re-rendering the React wrapper tears down the editor and
-            // focus jumps away (typing appears "blocked").
-            if (!readOnly) setSelectionLabel(toRangeLabel(range));
-          }}
-          afterSelectionEnd={(r, c, r2, c2) => {
-            const hot = hotRef.current?.hotInstance;
-            if (!hot || !Number.isInteger(r) || !Number.isInteger(c)) return;
-            const rowCount =
-              typeof hot.countRows === "function"
-                ? Math.max(1, hot.countRows())
-                : Math.max(1, safeGrid.length);
-            const colCount =
-              typeof hot.countCols === "function"
-                ? Math.max(1, hot.countCols())
-                : Math.max(1, safeGrid[0]?.length || 1);
-            const endRowRaw = Number.isInteger(r2) ? r2 : r;
-            const endColRaw = Number.isInteger(c2) ? c2 : c;
-            const startRowRaw = r < 0 ? 0 : r;
-            const endRowNormalized = endRowRaw < 0 ? rowCount - 1 : endRowRaw;
-            const startColRaw = c < 0 ? 0 : c;
-            const endColNormalized = endColRaw < 0 ? colCount - 1 : endColRaw;
-            const range = {
-              startRow: Math.max(0, Math.min(startRowRaw, endRowNormalized)),
-              endRow: Math.min(
-                rowCount - 1,
-                Math.max(startRowRaw, endRowNormalized),
-              ),
-              startCol: Math.max(0, Math.min(startColRaw, endColNormalized)),
-              endCol: Math.min(
-                colCount - 1,
-                Math.max(startColRaw, endColNormalized),
-              ),
-            };
-            lastSelectionRef.current = range;
-            sheetSelectionRef.current[activeSheetIndexRef.current] = range;
-
-            if (readOnly) {
-              // Find the scrollable modal container
-              const root = hot.rootElement as HTMLElement | undefined;
-              const container =
-                root?.closest('[role="dialog"]') ??
-                root?.closest(
-                  "[data-radix-scroll-area-viewport], .overflow-y-auto, .overflow-auto",
-                ) ??
-                document.documentElement;
-
-              const savedTop = (container as HTMLElement)?.scrollTop ?? 0;
-              const savedLeft = (container as HTMLElement)?.scrollLeft ?? 0;
-
-              // These setState calls cause re-render → scroll jump
-              setSelectionLabel(toRangeLabel(range));
-              const v = hot.getDataAtCell(range.startRow, range.startCol);
-              setFormulaInput(v == null ? "" : String(v));
-
-              // Restore scroll after React commits the re-render
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  if (container && container !== document.documentElement) {
-                    (container as HTMLElement).scrollTop = savedTop;
-                    (container as HTMLElement).scrollLeft = savedLeft;
-                  } else {
-                    window.scrollTo(savedLeft, savedTop);
-                  }
-                });
-              });
-              return;
-            }
-
-            setSelectionLabel(toRangeLabel(range));
-            syncToolbarFromCell(hot, range.startRow, range.startCol);
-          }}
-          afterMergeCells={() => {
-            if (!readOnly) {
-              collectCurrentSheetFromHot(true);
-              refreshUndoRedoState();
-            }
-          }}
-          afterUnmergeCells={() => {
-            if (!readOnly) {
-              collectCurrentSheetFromHot(true);
-              refreshUndoRedoState();
-            }
-          }}
-          afterCreateRow={() => refreshUndoRedoState()}
-          afterCreateCol={() => refreshUndoRedoState()}
-          afterRemoveRow={() => refreshUndoRedoState()}
-          afterRemoveCol={() => refreshUndoRedoState()}
-        />
+          afterColumnResize={afterColumnResize}
+          afterRowResize={afterRowResize}
+          afterChange={afterChange}
+          afterSelection={afterSelection}
+          afterSelectionEnd={afterSelectionEnd}
+          afterMergeCells={afterMergeCells}
+          afterUnmergeCells={afterUnmergeCells}
+          afterCreateRow={afterCreateRow}
+          afterCreateCol={afterCreateCol}
+          afterRemoveRow={afterRemoveRow}
+          afterRemoveCol={afterRemoveCol}
+          />
+        </div>
       </div>
 
       {isPreviewTruncated && (
