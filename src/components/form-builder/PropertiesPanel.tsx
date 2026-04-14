@@ -147,10 +147,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: "array", cellDates: true, cellStyles: true });
       const imageMapBySheet = new Map<string, Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }>>();
+      const excelJsSheetMap = new Map<string, ExcelJS.Worksheet>();
       try {
         const excelJsWorkbook = new ExcelJS.Workbook();
         await excelJsWorkbook.xlsx.load(buffer as ArrayBuffer);
         for (const ws of excelJsWorkbook.worksheets) {
+          excelJsSheetMap.set(ws.name, ws);
           const items: Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }> = [];
           const images = ws.getImages().slice(0, MAX_IMPORT_IMAGES);
           for (const item of images) {
@@ -198,11 +200,41 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         }
         const rows = Math.min(MAX_IMPORT_ROWS, Math.max(1, maxR - range.s.r + 1));
         const cols = Math.min(MAX_IMPORT_COLS, Math.max(1, maxC - range.s.c + 1));
+        const excelJsSheet = excelJsSheetMap.get(name);
+        const checkboxCoordSet = new Set<string>();
+        const toBooleanString = (value: unknown): "true" | "false" | null => {
+          if (value === true) return "true";
+          if (value === false) return "false";
+          if (typeof value === "string") {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === "true" || normalized === "false") return normalized;
+          }
+          return null;
+        };
+        const getExcelJsComparableValue = (value: unknown): unknown => {
+          if (!value || typeof value !== "object") return value;
+          if ("result" in (value as any)) return (value as any).result;
+          return value;
+        };
 
         const grid = Array.from({ length: rows }, (_, r) =>
           Array.from({ length: cols }, (_, c) => {
             const addr = XLSX.utils.encode_cell({ r: r + range.s.r, c: c + range.s.c });
             const cell = ws?.[addr] as { w?: unknown; v?: unknown } | undefined;
+            const excelJsCell = excelJsSheet?.getCell(addr);
+            const excelJsComparableValue = getExcelJsComparableValue(excelJsCell?.value);
+            const isExcelBooleanCell =
+              excelJsCell?.type === ExcelJS.ValueType.Boolean ||
+              excelJsComparableValue === true ||
+              excelJsComparableValue === false;
+            const booleanStringValue =
+              toBooleanString(excelJsComparableValue) ??
+              toBooleanString(cell?.v) ??
+              toBooleanString(cell?.w);
+            if (isExcelBooleanCell || booleanStringValue) {
+              checkboxCoordSet.add(`${r}:${c}`);
+              return booleanStringValue ?? String(excelJsComparableValue);
+            }
             if (!cell) return "";
             if (cell.w != null) return String(cell.w);
             if (cell.v == null) return "";
@@ -219,7 +251,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             }))
           : [];
 
-        const cellMeta: Array<{ row: number; col: number; className?: string }> = [];
+        const cellMeta: Array<{ row: number; col: number; className?: string; type?: string }> = [];
+        const cellMetaByCoord = new Map<string, { row: number; col: number; className?: string; type?: string }>();
         if (rows * cols <= MAX_STYLE_SCAN_CELLS) {
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
@@ -259,13 +292,27 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               if (style.alignment?.wrapText) classes.push("meta-wrap");
 
               if (classes.length > 0) {
-                cellMeta.push({
+                const entry = {
                   row: r,
                   col: c,
                   className: classes.join(" "),
-                });
+                };
+                cellMeta.push(entry);
+                cellMetaByCoord.set(`${r}:${c}`, entry);
               }
             }
+          }
+        }
+        for (const coord of checkboxCoordSet) {
+          const existing = cellMetaByCoord.get(coord);
+          const [row, col] = coord.split(":").map((v) => Number(v));
+          if (existing) {
+            existing.type = "checkbox";
+            if (existing.className == null) existing.className = "";
+          } else {
+            const entry = { row, col, type: "checkbox", className: "" };
+            cellMeta.push(entry);
+            cellMetaByCoord.set(coord, entry);
           }
         }
 
