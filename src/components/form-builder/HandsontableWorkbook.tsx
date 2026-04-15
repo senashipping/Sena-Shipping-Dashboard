@@ -1460,6 +1460,7 @@ const HandsontableWorkbook = React.forwardRef<
     if (sig === lastIncomingSignatureRef.current) return;
 
     const hot = hotRef.current?.hotInstance;
+    if (readOnly && isEditingRef.current) return;
     if (hot && typeof hot.isEditorOpened === "function" && hot.isEditorOpened())
       return;
 
@@ -1841,7 +1842,7 @@ const HandsontableWorkbook = React.forwardRef<
     (changes: any, source: string) => {
       afterChange(changes, source);
       if (!readOnly) return;
-      if (source === "edit" || source === "Autofill.fill") {
+      if (source === "afterAutofill" || source === "Autofill.fill") {
         isEditingRef.current = false;
       }
       setTimeout(() => {

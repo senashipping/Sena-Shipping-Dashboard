@@ -67,11 +67,13 @@ export const useWorkbookHotCallbacks = ({
         if (!readOnly && Array.isArray(changes) && changes.length > 0) {
           scheduleUndoRedoRefresh();
         }
-        if (
-          readOnly &&
-          changes &&
-          source !== "updateData"
-        ) {
+        if (readOnly && changes && source !== "updateData") {
+          if (source === "edit") {
+            // HOT fires `edit` on each keystroke while the inline editor is open.
+            // Persist on edit-end hooks instead of pushing parent updates per key.
+            pendingReadOnlyEmitRef.current = true;
+            return;
+          }
           const idx = activeSheetIndexRef.current;
           const sheet = workbookRef.current.sheets[idx];
           if (!sheet) return;

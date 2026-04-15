@@ -8,6 +8,7 @@ import { ArrowLeft, FileText } from "lucide-react";
 import SharedFormRenderer from "../../components/form-builder/SharedFormRenderer";
 
 const FormSubmission: React.FC = () => {
+  console.log("render");
   const { id: formId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -219,6 +220,7 @@ const FormSubmission: React.FC = () => {
             onMixedTableChange={handleMixedTableChange}
             onAddTableRow={handleAddTableRow}
             onRemoveTableRow={handleRemoveTableRow}
+            useLocalExcelState
             excelReadOnly
             submitButton={
               <Button
