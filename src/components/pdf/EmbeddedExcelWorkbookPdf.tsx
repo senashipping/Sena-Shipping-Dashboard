@@ -5,7 +5,12 @@ import { View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 export type EmbeddedExcelPdfSheet = {
   name: string;
   grid: unknown[][];
-  mergeCells?: Array<{ row: number; col: number; rowspan: number; colspan: number }>;
+  mergeCells?: Array<{
+    row: number;
+    col: number;
+    rowspan: number;
+    colspan: number;
+  }>;
   cellMeta?: Array<{ row: number; col: number; className?: string }>;
   images?: Array<{
     row: number;
@@ -29,17 +34,10 @@ const C = {
   sheetTitle: "#0f2341",
 };
 
-const BASE_ROW_MIN_PT = 13;
-const BASE_CELL_FONT_PT = 6.5;
-const BASE_CELL_PADDING_PT = 2;
-const BASE_TITLE_FONT_PT = 8;
-const BASE_TITLE_PAD_H = 4;
-const BASE_TITLE_PAD_V = 3;
-const BASE_IMAGE_W = 44;
-const BASE_IMAGE_H = 16;
-const FIT_TARGET_ROWS = 62;
-const FIT_TARGET_COLS = 22;
-const FIT_MIN_SCALE = 0.28;
+const MAX_ROWS = 260;
+const MAX_COLS = 56;
+const ROW_MIN_PT = 13;
+const CELL_FONT = 6.5;
 
 const es = StyleSheet.create({
   sheetBlock: {
@@ -69,7 +67,7 @@ const es = StyleSheet.create({
     alignItems: "stretch",
   },
   cellInner: {
-    fontSize: BASE_CELL_FONT_PT,
+    fontSize: CELL_FONT,
     color: C.text,
     lineHeight: 1.15,
   },
@@ -80,43 +78,6 @@ const es = StyleSheet.create({
     paddingHorizontal: 2,
   },
 });
-
-type SheetScaleMetrics = {
-  rowMinPt: number;
-  cellFontPt: number;
-  cellPaddingPt: number;
-  titleFontPt: number;
-  titlePadH: number;
-  titlePadV: number;
-  imageW: number;
-  imageH: number;
-};
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
-}
-
-/**
- * Heuristic fit: many rows and many columns both increase page pressure.
- * Scale down smoothly so dense sheets still fit a single PDF page.
- */
-function computeSheetScaleMetrics(rows: number, cols: number, maxCellChars: number): SheetScaleMetrics {
-  const rowScale = rows > FIT_TARGET_ROWS ? FIT_TARGET_ROWS / rows : 1;
-  const colScale = cols > FIT_TARGET_COLS ? FIT_TARGET_COLS / cols : 1;
-  // Long text in narrow columns raises effective row height due to wrapping.
-  const textScale = maxCellChars > 28 ? 28 / maxCellChars : 1;
-  const scale = clamp(Math.min(rowScale, colScale, textScale), FIT_MIN_SCALE, 1);
-  return {
-    rowMinPt: BASE_ROW_MIN_PT * scale,
-    cellFontPt: BASE_CELL_FONT_PT * scale,
-    cellPaddingPt: BASE_CELL_PADDING_PT * scale,
-    titleFontPt: BASE_TITLE_FONT_PT * scale,
-    titlePadH: BASE_TITLE_PAD_H * scale,
-    titlePadV: BASE_TITLE_PAD_V * scale,
-    imageW: BASE_IMAGE_W * scale,
-    imageH: BASE_IMAGE_H * scale,
-  };
-}
 
 function toSafeGrid(raw: unknown): string[][] {
   if (!Array.isArray(raw) || raw.length === 0) return [[""]];
@@ -141,7 +102,8 @@ function clipMerges(
     const c0 = +m.col;
     const rs = +m.rowspan;
     const cs = +m.colspan;
-    if (![r0, c0, rs, cs].every((n) => Number.isFinite(n)) || rs < 1 || cs < 1) continue;
+    if (![r0, c0, rs, cs].every((n) => Number.isFinite(n)) || rs < 1 || cs < 1)
+      continue;
     const r1 = r0 + rs - 1;
     const c1 = c0 + cs - 1;
     const cr0 = Math.max(0, Math.min(maxR, r0));
@@ -151,12 +113,16 @@ function clipMerges(
     if (cr1 < cr0 || cc1 < cc0) continue;
     const rowspan = cr1 - cr0 + 1;
     const colspan = cc1 - cc0 + 1;
-    if (rowspan > 0 && colspan > 0) out.push({ row: cr0, col: cc0, rowspan, colspan });
+    if (rowspan > 0 && colspan > 0)
+      out.push({ row: cr0, col: cc0, rowspan, colspan });
   }
   return out;
 }
 
-function normalizeSheet(sheet: EmbeddedExcelPdfSheet, index: number): {
+function normalizeSheet(
+  sheet: EmbeddedExcelPdfSheet,
+  index: number,
+): {
   name: string;
   grid: string[][];
   merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>;
@@ -167,9 +133,16 @@ function normalizeSheet(sheet: EmbeddedExcelPdfSheet, index: number): {
   const gridRows = grid.length;
   const gridCols = Math.max(
     1,
-    grid.reduce((w, row) => Math.max(w, Array.isArray(row) ? row.length : 0), 0),
+    grid.reduce(
+      (w, row) => Math.max(w, Array.isArray(row) ? row.length : 0),
+      0,
+    ),
   );
-  const merges = clipMerges(Array.isArray(sheet?.mergeCells) ? sheet.mergeCells : [], gridRows, gridCols);
+  const merges = clipMerges(
+    Array.isArray(sheet?.mergeCells) ? sheet.mergeCells : [],
+    gridRows,
+    gridCols,
+  );
   const fillable = new Set<string>();
   for (const m of sheet?.cellMeta || []) {
     if (!m || !Number.isFinite(+m.row) || !Number.isFinite(+m.col)) continue;
@@ -178,7 +151,13 @@ function normalizeSheet(sheet: EmbeddedExcelPdfSheet, index: number): {
   }
   const imagesByKey = new Map<string, EmbeddedSheetImage>();
   for (const im of sheet?.images || []) {
-    if (!im || !Number.isFinite(+im.row) || !Number.isFinite(+im.col) || !im.dataUrl) continue;
+    if (
+      !im ||
+      !Number.isFinite(+im.row) ||
+      !Number.isFinite(+im.col) ||
+      !im.dataUrl
+    )
+      continue;
     imagesByKey.set(`${+im.row},${+im.col}`, im);
   }
   return {
@@ -190,7 +169,55 @@ function normalizeSheet(sheet: EmbeddedExcelPdfSheet, index: number): {
   };
 }
 
-function mergeAt(r: number, c: number, merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>) {
+function usedGridBounds(
+  grid: string[][],
+  merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>,
+  fillable: Set<string>,
+  imagesByKey: Map<string, EmbeddedSheetImage>,
+) {
+  let maxRow = 0;
+  let maxCol = 0;
+
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if ((row[c] ?? "").trim() !== "") {
+        if (r > maxRow) maxRow = r;
+        if (c > maxCol) maxCol = c;
+      }
+    }
+  }
+
+  for (const m of merges) {
+    const r = Math.max(0, m.row + Math.max(1, m.rowspan) - 1);
+    const c = Math.max(0, m.col + Math.max(1, m.colspan) - 1);
+    if (r > maxRow) maxRow = r;
+    if (c > maxCol) maxCol = c;
+  }
+
+  for (const key of fillable) {
+    const [r, c] = key.split(",").map(Number);
+    if (Number.isFinite(r) && r > maxRow) maxRow = r;
+    if (Number.isFinite(c) && c > maxCol) maxCol = c;
+  }
+
+  for (const [key, img] of imagesByKey) {
+    const [r0, c0] = key.split(",").map(Number);
+    if (!Number.isFinite(r0) || !Number.isFinite(c0)) continue;
+    const r = r0 + Math.max(1, Number(img?.rowspan) || 1) - 1;
+    const c = c0 + Math.max(1, Number(img?.colspan) || 1) - 1;
+    if (r > maxRow) maxRow = r;
+    if (c > maxCol) maxCol = c;
+  }
+
+  return { rows: Math.max(1, maxRow + 1), cols: Math.max(1, maxCol + 1) };
+}
+
+function mergeAt(
+  r: number,
+  c: number,
+  merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>,
+) {
   for (const m of merges) {
     if (m.row === r && m.col === c) return m;
   }
@@ -227,27 +254,26 @@ function cellStyle(
   rowspan: number,
   isFillable: boolean,
   borders: { left: boolean; top: boolean },
-  metrics: SheetScaleMetrics,
 ) {
   return {
     width: `${widthPct}%`,
-    minHeight: metrics.rowMinPt * rowspan,
+    minHeight: ROW_MIN_PT * rowspan,
     borderLeftWidth: borders.left ? 1 : 0,
     borderTopWidth: borders.top ? 1 : 0,
     borderRightWidth: 1,
     borderBottomWidth: 1,
     borderColor: C.border,
-    padding: metrics.cellPaddingPt,
+    padding: 1.5,
     backgroundColor: isFillable ? C.fillableBg : C.white,
     justifyContent: "flex-start" as const,
   };
 }
 
 /** Continuation row under a rowspan merge — no top border so it meets the cell above. */
-function vContCellStyle(widthPct: number, metrics: SheetScaleMetrics) {
+function vContCellStyle(widthPct: number) {
   return {
     width: `${widthPct}%`,
-    minHeight: metrics.rowMinPt,
+    minHeight: ROW_MIN_PT,
     borderLeftWidth: 1,
     borderTopWidth: 0,
     borderRightWidth: 1,
@@ -264,14 +290,16 @@ function SheetTable({
   merges,
   fillable,
   imagesByKey,
-  metrics,
+  truncated,
+  startOnNewPage,
 }: {
   name: string;
   grid: string[][];
   merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>;
   fillable: Set<string>;
   imagesByKey: Map<string, EmbeddedSheetImage>;
-  metrics: SheetScaleMetrics;
+  truncated: boolean;
+  startOnNewPage?: boolean;
 }) {
   const rows = grid.length;
   const cols = Math.max(
@@ -287,7 +315,7 @@ function SheetTable({
       const vt = verticalTailMerge(r, c, merges);
       if (vt) {
         const w = (vt.colspan / cols) * 100;
-        segments.push(<View key={`vt-${r}-${c}`} style={vContCellStyle(w, metrics)} />);
+        segments.push(<View key={`vt-${r}-${c}`} style={vContCellStyle(w)} />);
         c += vt.colspan;
         continue;
       }
@@ -304,15 +332,18 @@ function SheetTable({
         segments.push(
           <View
             key={`a-${r}-${c}`}
-            style={cellStyle(w, anch.rowspan, fill, { left: c === 0, top: r === 0 }, metrics)}
+            style={cellStyle(w, anch.rowspan, fill, {
+              left: c === 0,
+              top: r === 0,
+            })}
           >
             {img?.dataUrl?.startsWith("data:") ? (
               <Image
                 src={img.dataUrl}
-                style={{ width: metrics.imageW, height: metrics.imageH, objectFit: "contain" }}
+                style={{ width: 36, height: 14, objectFit: "contain" }}
               />
             ) : null}
-            <Text style={[es.cellInner, { fontSize: metrics.cellFontPt }]} wrap>
+            <Text style={es.cellInner} wrap>
               {txt}
             </Text>
           </View>,
@@ -327,15 +358,15 @@ function SheetTable({
       segments.push(
         <View
           key={`c-${r}-${c}`}
-          style={cellStyle(w, 1, fill, { left: c === 0, top: r === 0 }, metrics)}
+          style={cellStyle(w, 1, fill, { left: c === 0, top: r === 0 })}
         >
           {img?.dataUrl?.startsWith("data:") ? (
             <Image
               src={img.dataUrl}
-              style={{ width: metrics.imageW, height: metrics.imageH, objectFit: "contain" }}
+              style={{ width: 36, height: 14, objectFit: "contain" }}
             />
           ) : null}
-          <Text style={[es.cellInner, { fontSize: metrics.cellFontPt }]} wrap>
+          <Text style={es.cellInner} wrap>
             {txt}
           </Text>
         </View>,
@@ -350,37 +381,29 @@ function SheetTable({
   }
 
   return (
-    <View style={es.sheetBlock} wrap={false}>
-      <Text
-        style={[
-          es.sheetTitle,
-          {
-            fontSize: metrics.titleFontPt,
-            paddingHorizontal: metrics.titlePadH,
-            paddingVertical: metrics.titlePadV,
-          },
-        ]}
-      >
-        {name}
-      </Text>
+    <View style={es.sheetBlock} wrap break={startOnNewPage}>
+      <Text style={es.sheetTitle}>{name}</Text>
       <View style={es.table}>{body}</View>
+      {truncated ? (
+        <Text style={es.truncateNote}>
+          Grid truncated for PDF ({MAX_ROWS} rows × {MAX_COLS} columns max).
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 export type EmbeddedExcelWorkbookPdfProps = {
   workbook: EmbeddedExcelPdfWorkbook | null | undefined;
-  breakBeforeFirstSheet?: boolean;
 };
 
 /**
  * Renders embedded Excel workbook sheets as bordered tables in React-PDF (submission / template export).
  * Respects merge regions and `meta-fillable` cell highlighting.
  */
-export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> = ({
-  workbook,
-  breakBeforeFirstSheet = false,
-}) => {
+export const EmbeddedExcelWorkbookPdf: React.FC<
+  EmbeddedExcelWorkbookPdfProps
+> = ({ workbook }) => {
   const sheets = workbook?.sheets;
   if (!Array.isArray(sheets) || sheets.length === 0) {
     return (
@@ -395,18 +418,28 @@ export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> =
       {sheets.map((raw, idx) => {
         const n = normalizeSheet(raw, idx);
         let grid = n.grid;
+        const usedBounds = usedGridBounds(
+          grid,
+          n.merges,
+          n.fillable,
+          n.imagesByKey,
+        );
+        grid = grid
+          .slice(0, usedBounds.rows)
+          .map((row) => [...row].slice(0, usedBounds.cols));
+        let truncated = false;
+        const origMaxCol = grid.reduce((w, row) => Math.max(w, row.length), 0);
+        if (grid.length > MAX_ROWS || origMaxCol > MAX_COLS) {
+          truncated = true;
+          grid = grid
+            .slice(0, MAX_ROWS)
+            .map((row) => [...row].slice(0, MAX_COLS));
+        }
         const gridRows = grid.length;
         let gridCols = Math.max(
           1,
           grid.reduce((w, row) => Math.max(w, row.length), 0),
         );
-        const maxCellChars = Math.max(
-          1,
-          ...grid.map((row) =>
-            row.reduce((m, cell) => Math.max(m, typeof cell === "string" ? cell.length : 0), 0),
-          ),
-        );
-        const metrics = computeSheetScaleMetrics(gridRows, gridCols, maxCellChars);
         grid = grid.map((row) => {
           const r = [...row];
           while (r.length < gridCols) r.push("");
@@ -424,16 +457,16 @@ export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> =
           if (rs < gridRows && cs < gridCols) imgs.set(k, v);
         }
         return (
-          <View key={`${n.name}-${idx}`} wrap={false} break={breakBeforeFirstSheet || idx > 0}>
-            <SheetTable
-              name={n.name}
-              grid={grid}
-              merges={merges}
-              fillable={fill}
-              imagesByKey={imgs}
-              metrics={metrics}
-            />
-          </View>
+          <SheetTable
+            key={`${n.name}-${idx}`}
+            name={n.name}
+            grid={grid}
+            merges={merges}
+            fillable={fill}
+            imagesByKey={imgs}
+            truncated={truncated}
+            startOnNewPage={idx > 0}
+          />
         );
       })}
     </View>
