@@ -10,6 +10,7 @@ export const useWorkbookHotCallbacks = ({
   activeSheetIndexRef,
   workbookRef,
   readOnlyPreviewDirtyRef,
+  onReadOnlyEdit,
 }: {
   hotRef: React.MutableRefObject<any>;
   yesNoOppositeCellMapRef: React.MutableRefObject<
@@ -20,6 +21,7 @@ export const useWorkbookHotCallbacks = ({
   activeSheetIndexRef: React.MutableRefObject<number>;
   workbookRef: React.MutableRefObject<{ sheets: SheetData[] }>;
   readOnlyPreviewDirtyRef: React.MutableRefObject<boolean>;
+  onReadOnlyEdit?: () => void;
 }) => {
   const afterChange = React.useCallback(
     (changes: any, source: string) => {
@@ -100,6 +102,7 @@ export const useWorkbookHotCallbacks = ({
               grid: newGrid,
             };
             readOnlyPreviewDirtyRef.current = true;
+            onReadOnlyEdit?.();
           }
         }
       }, 0);
@@ -109,6 +112,7 @@ export const useWorkbookHotCallbacks = ({
       hotRef,
       readOnly,
       readOnlyPreviewDirtyRef,
+      onReadOnlyEdit,
       scheduleUndoRedoRefresh,
       workbookRef,
       yesNoOppositeCellMapRef,

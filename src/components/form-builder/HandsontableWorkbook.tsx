@@ -996,6 +996,14 @@ const HandsontableWorkbook = React.forwardRef<
     }
   }, []);
 
+  const scheduleReadOnlyEmit = React.useCallback(() => {
+    flushReadOnlyEmitDebounce();
+    readOnlyEmitDebounceTimerRef.current = setTimeout(() => {
+      readOnlyEmitDebounceTimerRef.current = null;
+      emitWorkbookToParent();
+    }, 300);
+  }, [emitWorkbookToParent, flushReadOnlyEmitDebounce]);
+
   React.useEffect(
     () => () => {
       flushPendingColorTimers();
@@ -1781,6 +1789,7 @@ const HandsontableWorkbook = React.forwardRef<
     activeSheetIndexRef,
     workbookRef,
     readOnlyPreviewDirtyRef,
+    onReadOnlyEdit: scheduleReadOnlyEmit,
   });
 
   const afterSelection = React.useCallback(
@@ -2000,11 +2009,7 @@ const HandsontableWorkbook = React.forwardRef<
         if (next && e.currentTarget.contains(next)) return;
         if (!readOnlyPreviewDirtyRef.current) return;
         readOnlyPreviewDirtyRef.current = false;
-        flushReadOnlyEmitDebounce();
-        readOnlyEmitDebounceTimerRef.current = setTimeout(() => {
-          readOnlyEmitDebounceTimerRef.current = null;
-          emitWorkbookToParent();
-        }, 300);
+        scheduleReadOnlyEmit();
       }}
     >
       <style>{`
