@@ -26,7 +26,7 @@
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@react-pdf/renderer": "^4.3.2",
+    "@react-pdf/renderer": "4.3.2",
     "@syncfusion/ej2-base": "^33.1.45",
     "@syncfusion/ej2-react-grids": "^33.1.47",
     "@syncfusion/ej2-react-spreadsheet": "^33.1.47",
@@ -67,5 +67,11 @@
     "tailwindcss": "^3.3.5",
     "typescript": "^5.2.2",
     "vite": "^4.5.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@react-pdf/layout": "4.4.2",
+      "@react-pdf/image": "3.0.4"
+    }
   }
 }
