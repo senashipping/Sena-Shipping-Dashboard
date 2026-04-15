@@ -1456,6 +1456,9 @@ const HandsontableWorkbook = React.forwardRef<
       const isYesNoCheckboxCell = Boolean(
         extractYesNoPairToken(persistedClassName),
       );
+      // Some save/load paths keep checkbox class tokens but may lose `type`.
+      // Treat the persisted single-checkbox token as authoritative render intent.
+      const isSingleCheckboxCell = classTokens.includes(SINGLE_CHECKBOX_CLASS);
       const isFillable = readOnly
         ? fillableCellSet.has(cellCoordKey(row, col))
         : classTokens.includes("meta-fillable");
@@ -1472,6 +1475,11 @@ const HandsontableWorkbook = React.forwardRef<
           persistedMeta.uncheckedTemplate !== undefined
             ? persistedMeta.uncheckedTemplate
             : "";
+      }
+      if (isSingleCheckboxCell) {
+        cp.type = "checkbox";
+        if (cp.checkedTemplate === undefined) cp.checkedTemplate = "true";
+        if (cp.uncheckedTemplate === undefined) cp.uncheckedTemplate = "";
       }
       if (isYesNoCheckboxCell) {
         cp.type = "checkbox";
