@@ -31,8 +31,17 @@ const C = {
 
 const MAX_ROWS = 260;
 const MAX_COLS = 56;
-const ROW_MIN_PT = 11;
-const CELL_FONT = 5.5;
+const BASE_ROW_MIN_PT = 11;
+const BASE_CELL_FONT_PT = 5.5;
+const BASE_CELL_PADDING_PT = 1.5;
+const BASE_TITLE_FONT_PT = 7;
+const BASE_TITLE_PAD_H = 4;
+const BASE_TITLE_PAD_V = 3;
+const BASE_IMAGE_W = 36;
+const BASE_IMAGE_H = 14;
+const FIT_TARGET_ROWS = 46;
+const FIT_TARGET_COLS = 16;
+const FIT_MIN_SCALE = 0.44;
 
 const es = StyleSheet.create({
   sheetBlock: {
@@ -62,7 +71,7 @@ const es = StyleSheet.create({
     alignItems: "stretch",
   },
   cellInner: {
-    fontSize: CELL_FONT,
+    fontSize: BASE_CELL_FONT_PT,
     color: C.text,
     lineHeight: 1.15,
   },
@@ -73,6 +82,41 @@ const es = StyleSheet.create({
     paddingHorizontal: 2,
   },
 });
+
+type SheetScaleMetrics = {
+  rowMinPt: number;
+  cellFontPt: number;
+  cellPaddingPt: number;
+  titleFontPt: number;
+  titlePadH: number;
+  titlePadV: number;
+  imageW: number;
+  imageH: number;
+};
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * Heuristic fit: many rows and many columns both increase page pressure.
+ * Scale down smoothly so dense sheets still fit a single PDF page.
+ */
+function computeSheetScaleMetrics(rows: number, cols: number): SheetScaleMetrics {
+  const rowScale = rows > FIT_TARGET_ROWS ? FIT_TARGET_ROWS / rows : 1;
+  const colScale = cols > FIT_TARGET_COLS ? FIT_TARGET_COLS / cols : 1;
+  const scale = clamp(Math.min(rowScale, colScale), FIT_MIN_SCALE, 1);
+  return {
+    rowMinPt: BASE_ROW_MIN_PT * scale,
+    cellFontPt: BASE_CELL_FONT_PT * scale,
+    cellPaddingPt: BASE_CELL_PADDING_PT * scale,
+    titleFontPt: BASE_TITLE_FONT_PT * scale,
+    titlePadH: BASE_TITLE_PAD_H * scale,
+    titlePadV: BASE_TITLE_PAD_V * scale,
+    imageW: BASE_IMAGE_W * scale,
+    imageH: BASE_IMAGE_H * scale,
+  };
+}
 
 function toSafeGrid(raw: unknown): string[][] {
   if (!Array.isArray(raw) || raw.length === 0) return [[""]];
@@ -183,26 +227,27 @@ function cellStyle(
   rowspan: number,
   isFillable: boolean,
   borders: { left: boolean; top: boolean },
+  metrics: SheetScaleMetrics,
 ) {
   return {
     width: `${widthPct}%`,
-    minHeight: ROW_MIN_PT * rowspan,
+    minHeight: metrics.rowMinPt * rowspan,
     borderLeftWidth: borders.left ? 1 : 0,
     borderTopWidth: borders.top ? 1 : 0,
     borderRightWidth: 1,
     borderBottomWidth: 1,
     borderColor: C.border,
-    padding: 1.5,
+    padding: metrics.cellPaddingPt,
     backgroundColor: isFillable ? C.fillableBg : C.white,
     justifyContent: "flex-start" as const,
   };
 }
 
 /** Continuation row under a rowspan merge — no top border so it meets the cell above. */
-function vContCellStyle(widthPct: number) {
+function vContCellStyle(widthPct: number, metrics: SheetScaleMetrics) {
   return {
     width: `${widthPct}%`,
-    minHeight: ROW_MIN_PT,
+    minHeight: metrics.rowMinPt,
     borderLeftWidth: 1,
     borderTopWidth: 0,
     borderRightWidth: 1,
@@ -220,6 +265,7 @@ function SheetTable({
   fillable,
   imagesByKey,
   truncated,
+  metrics,
 }: {
   name: string;
   grid: string[][];
@@ -227,6 +273,7 @@ function SheetTable({
   fillable: Set<string>;
   imagesByKey: Map<string, EmbeddedSheetImage>;
   truncated: boolean;
+  metrics: SheetScaleMetrics;
 }) {
   const rows = grid.length;
   const cols = Math.max(
@@ -242,7 +289,7 @@ function SheetTable({
       const vt = verticalTailMerge(r, c, merges);
       if (vt) {
         const w = (vt.colspan / cols) * 100;
-        segments.push(<View key={`vt-${r}-${c}`} style={vContCellStyle(w)} />);
+        segments.push(<View key={`vt-${r}-${c}`} style={vContCellStyle(w, metrics)} />);
         c += vt.colspan;
         continue;
       }
@@ -259,12 +306,15 @@ function SheetTable({
         segments.push(
           <View
             key={`a-${r}-${c}`}
-            style={cellStyle(w, anch.rowspan, fill, { left: c === 0, top: r === 0 })}
+            style={cellStyle(w, anch.rowspan, fill, { left: c === 0, top: r === 0 }, metrics)}
           >
             {img?.dataUrl?.startsWith("data:") ? (
-              <Image src={img.dataUrl} style={{ width: 36, height: 14, objectFit: "contain" }} />
+              <Image
+                src={img.dataUrl}
+                style={{ width: metrics.imageW, height: metrics.imageH, objectFit: "contain" }}
+              />
             ) : null}
-            <Text style={es.cellInner} wrap>
+            <Text style={[es.cellInner, { fontSize: metrics.cellFontPt }]} wrap>
               {txt}
             </Text>
           </View>,
@@ -277,11 +327,17 @@ function SheetTable({
       const fill = fillable.has(`${r},${c}`);
       const img = imagesByKey.get(`${r},${c}`);
       segments.push(
-        <View key={`c-${r}-${c}`} style={cellStyle(w, 1, fill, { left: c === 0, top: r === 0 })}>
+        <View
+          key={`c-${r}-${c}`}
+          style={cellStyle(w, 1, fill, { left: c === 0, top: r === 0 }, metrics)}
+        >
           {img?.dataUrl?.startsWith("data:") ? (
-            <Image src={img.dataUrl} style={{ width: 36, height: 14, objectFit: "contain" }} />
+            <Image
+              src={img.dataUrl}
+              style={{ width: metrics.imageW, height: metrics.imageH, objectFit: "contain" }}
+            />
           ) : null}
-          <Text style={es.cellInner} wrap>
+          <Text style={[es.cellInner, { fontSize: metrics.cellFontPt }]} wrap>
             {txt}
           </Text>
         </View>,
@@ -296,8 +352,19 @@ function SheetTable({
   }
 
   return (
-    <View style={es.sheetBlock} wrap>
-      <Text style={es.sheetTitle}>{name}</Text>
+    <View style={es.sheetBlock} wrap={false}>
+      <Text
+        style={[
+          es.sheetTitle,
+          {
+            fontSize: metrics.titleFontPt,
+            paddingHorizontal: metrics.titlePadH,
+            paddingVertical: metrics.titlePadV,
+          },
+        ]}
+      >
+        {name}
+      </Text>
       <View style={es.table}>{body}</View>
       {truncated ? (
         <Text style={es.truncateNote}>
@@ -342,6 +409,7 @@ export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> =
           1,
           grid.reduce((w, row) => Math.max(w, row.length), 0),
         );
+        const metrics = computeSheetScaleMetrics(gridRows, gridCols);
         grid = grid.map((row) => {
           const r = [...row];
           while (r.length < gridCols) r.push("");
@@ -359,15 +427,17 @@ export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> =
           if (rs < gridRows && cs < gridCols) imgs.set(k, v);
         }
         return (
-          <SheetTable
-            key={`${n.name}-${idx}`}
-            name={n.name}
-            grid={grid}
-            merges={merges}
-            fillable={fill}
-            imagesByKey={imgs}
-            truncated={truncated}
-          />
+          <View key={`${n.name}-${idx}`} wrap={false} break={idx > 0}>
+            <SheetTable
+              name={n.name}
+              grid={grid}
+              merges={merges}
+              fillable={fill}
+              imagesByKey={imgs}
+              truncated={truncated}
+              metrics={metrics}
+            />
+          </View>
         );
       })}
     </View>
