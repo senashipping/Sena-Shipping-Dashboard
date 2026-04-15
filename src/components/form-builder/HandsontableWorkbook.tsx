@@ -48,7 +48,6 @@ const FORMULAS_CONFIG = { engine: HyperFormula };
 // Prevent toolbar buttons from stealing focus from the grid
 const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 
-
 type ToolbarButtonProps = {
   onClick: () => void;
   children: React.ReactNode;
@@ -81,7 +80,6 @@ const TB = ({
     {children}
   </Button>
 );
-
 
 // ─── component ────────────────────────────────────────────────────────────────
 
@@ -125,22 +123,7 @@ const HandsontableWorkbook = React.forwardRef<
     const first = workbookRef.current.sheets[0];
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
-    if (!readOnly) {
-      const editable = cloneEditableGrid(base);
-      if (!lightweightPerformance) return editable;
-      let lastNonEmptyCol = -1;
-      for (const row of editable) {
-        if (!Array.isArray(row)) continue;
-        for (let c = row.length - 1; c >= 0; c--) {
-          if (String(row[c] ?? "").trim() !== "") {
-            if (c > lastNonEmptyCol) lastNonEmptyCol = c;
-            break;
-          }
-        }
-      }
-      const keepCols = Math.max(1, lastNonEmptyCol + 1);
-      return editable.map((row) => (Array.isArray(row) ? row.slice(0, keepCols) : []));
-    }
+    if (!readOnly) return cloneEditableGrid(base);
     const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
     const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
     return base
@@ -169,11 +152,15 @@ const HandsontableWorkbook = React.forwardRef<
   const [canUndo, setCanUndo] = React.useState(false);
   const [canRedo, setCanRedo] = React.useState(false);
 
-  const { lastSelectionRef, sheetSelectionRef, getToolbarActionRange, restoreHotRange } =
-    useWorkbookSelection({
-      workbookRef,
-      activeSheetIndexRef,
-    });
+  const {
+    lastSelectionRef,
+    sheetSelectionRef,
+    getToolbarActionRange,
+    restoreHotRange,
+  } = useWorkbookSelection({
+    workbookRef,
+    activeSheetIndexRef,
+  });
 
   const hotRef = React.useRef<any>(null);
   const hotViewportRef = React.useRef<HTMLDivElement | null>(null);
@@ -199,23 +186,7 @@ const HandsontableWorkbook = React.forwardRef<
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
-
-  const trimTrailingEmptyColumns = React.useCallback((grid: string[][]) => {
-    if (!Array.isArray(grid) || grid.length === 0) return [[""]];
-    let lastNonEmptyCol = -1;
-    for (const row of grid) {
-      if (!Array.isArray(row)) continue;
-      for (let c = row.length - 1; c >= 0; c--) {
-        const cell = row[c];
-        if (String(cell ?? "").trim() !== "") {
-          if (c > lastNonEmptyCol) lastNonEmptyCol = c;
-          break;
-        }
-      }
-    }
-    const keepCols = Math.max(1, lastNonEmptyCol + 1);
-    return grid.map((row) => (Array.isArray(row) ? row.slice(0, keepCols) : []));
-  }, []);
+  const preserveScrollOnNextLoadRef = React.useRef(true);
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -487,15 +458,23 @@ const HandsontableWorkbook = React.forwardRef<
       );
       if (!readOnly) {
         const originalColCount = originalSheetColCountRef.current.get(idx) || 1;
-        const structureChanged = columnStructureDirtyRef.current.get(idx) === true;
-        if (!structureChanged && Number.isFinite(originalColCount) && originalColCount > 0) {
+        const structureChanged =
+          columnStructureDirtyRef.current.get(idx) === true;
+        if (
+          !structureChanged &&
+          Number.isFinite(originalColCount) &&
+          originalColCount > 0
+        ) {
           for (let r = 0; r < nextGrid.length; r++) {
             const row = nextGrid[r];
             if (!Array.isArray(row)) continue;
             if (row.length >= originalColCount) continue;
             nextGrid[r] = [
               ...row,
-              ...Array.from({ length: originalColCount - row.length }, () => ""),
+              ...Array.from(
+                { length: originalColCount - row.length },
+                () => "",
+              ),
             ];
           }
         }
@@ -710,18 +689,14 @@ const HandsontableWorkbook = React.forwardRef<
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
       const base = sheet?.grid?.length ? sheet.grid : [[""]];
-      if (!readOnly) {
-        const editable = cloneEditableGrid(base);
-        if (!lightweightPerformance) return editable;
-        return trimTrailingEmptyColumns(editable);
-      }
+      if (!readOnly) return cloneEditableGrid(base);
       const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
       const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
       return base
         .slice(0, rows)
         .map((row) => (Array.isArray(row) ? row.slice(0, cols) : []));
     },
-    [readOnly, lightweightPerformance, trimTrailingEmptyColumns],
+    [readOnly],
   );
 
   const normalizeLegacyCheckboxValues = React.useCallback(
@@ -908,6 +883,7 @@ const HandsontableWorkbook = React.forwardRef<
       // second internal loadData when it detects the new `data` prop).
       // Only restore if the sheet didn't change (user was already on this tab).
       const shouldRestoreScroll =
+        preserveScrollOnNextLoadRef.current &&
         Boolean(saved) &&
         targetIndex === activeSheetIndexRef.current &&
         (savedScrollTop > 0 || savedScrollLeft > 0);
@@ -924,26 +900,15 @@ const HandsontableWorkbook = React.forwardRef<
             }
           });
         });
-      } else {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const h = hotRef.current?.hotInstance;
-            const holder = h?.rootElement?.querySelector?.(
-              ".wtHolder",
-            ) as HTMLElement | null;
-            if (holder) {
-              holder.scrollTop = 0;
-              holder.scrollLeft = 0;
-            }
-          });
-        });
       }
+      preserveScrollOnNextLoadRef.current = true;
     },
     [readOnly, toVisibleGrid, normalizeLegacyCheckboxValues],
   );
 
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
+    preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
       collectCurrentSheetFromHot(true, activeSheetIndex);
       emitWorkbookToParent();
@@ -1958,7 +1923,8 @@ const HandsontableWorkbook = React.forwardRef<
       viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
       formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
-      mergeCells: renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
+      mergeCells:
+        renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
       filters: heavyPluginsEnabled,
       dropdownMenu: heavyPluginsEnabled,
       columnSorting: !readOnly,
