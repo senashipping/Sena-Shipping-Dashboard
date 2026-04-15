@@ -191,6 +191,8 @@ const HandsontableWorkbook = React.forwardRef<
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const preserveScrollOnNextLoadRef = React.useRef(true);
+  const disableEditorCompletely = readOnly && strictViewOnly;
+  console.log("disableEditorCompletely", disableEditorCompletely);
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -1715,6 +1717,12 @@ const HandsontableWorkbook = React.forwardRef<
           return td;
         };
       }
+      if (disableEditorCompletely) {
+        // Submission details view must be fully non-interactive at cell level.
+        cp.editor = false;
+      }
+      // Keep this as the final assignment so nothing above can override it.
+      if (disableEditorCompletely) cp.readOnly = true;
       cellsCacheRef.current.set(cacheKey, cp);
       return cp;
     },
@@ -1723,6 +1731,7 @@ const HandsontableWorkbook = React.forwardRef<
       fillableCellSet,
       imageMap,
       readOnly,
+      disableEditorCompletely,
       renderedColWidths,
       renderedRowHeights,
     ],
@@ -1734,22 +1743,23 @@ const HandsontableWorkbook = React.forwardRef<
    */
   const afterGetCellMeta = React.useCallback(
     (row: number, col: number, cellProps: Record<string, unknown>) => {
+      if (disableEditorCompletely) {
+        (cellProps as { readOnly?: boolean; editor?: false }).readOnly = true;
+        (cellProps as { readOnly?: boolean; editor?: false }).editor = false;
+        return;
+      }
       if (!readOnly) {
         (cellProps as { readOnly?: boolean }).readOnly = false;
         return;
       }
-      // Formula cells must stay writable for HyperFormula recalculation updates.
       if (formulaCellSetRef.current.has(cellCoordKey(row, col))) {
         (cellProps as { readOnly?: boolean }).readOnly = false;
         return;
       }
-      // Do not trust `cellProps.className` alone: in preview we skip `setCellMeta` in
-      // `loadSheetIntoHot`, so HOT often has no `meta-fillable` on the meta layer even when
-      // persisted `cellMeta` does — that left `readOnly` stuck true and blocked all typing.
       const isFillable = fillableCellSet.has(cellCoordKey(row, col));
       (cellProps as { readOnly?: boolean }).readOnly = !isFillable;
     },
-    [readOnly, fillableCellSet],
+    [readOnly, fillableCellSet, disableEditorCompletely],
   );
 
   const afterColumnResize = React.useCallback(() => {
@@ -1971,7 +1981,6 @@ const HandsontableWorkbook = React.forwardRef<
   }, [readOnly]);
 
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
-  const disableEditorCompletely = readOnly && strictViewOnly;
   const hotTableSettings = React.useMemo(
     () => ({
       data: initialGrid,
@@ -1982,6 +1991,11 @@ const HandsontableWorkbook = React.forwardRef<
       readOnly: disableEditorCompletely ? true : false,
       disableVisualSelection: disableEditorCompletely ? false : undefined,
       editor: disableEditorCompletely ? false : undefined,
+      beforeKeyDown: disableEditorCompletely
+        ? (e: KeyboardEvent) => {
+            e.stopImmediatePropagation();
+          }
+        : undefined,
       trimWhitespace: false,
       width: hotViewportWidth > 0 ? hotViewportWidth : "100%",
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
@@ -2015,6 +2029,7 @@ const HandsontableWorkbook = React.forwardRef<
       autoWrapCol: true,
       cells: cellsCallback,
       afterGetCellMeta,
+      beforeChange: disableEditorCompletely ? (() => false) : undefined,
       afterColumnResize,
       afterRowResize,
       afterChange: disableEditorCompletely
@@ -2049,6 +2064,7 @@ const HandsontableWorkbook = React.forwardRef<
       renderedRowHeights,
       cellsCallback,
       afterGetCellMeta,
+      disableEditorCompletely,
       afterColumnResize,
       afterRowResize,
       afterChangeWithEditTracking,
