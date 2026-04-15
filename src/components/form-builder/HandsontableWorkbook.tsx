@@ -1686,8 +1686,10 @@ const HandsontableWorkbook = React.forwardRef<
           if (sizeToken)
             s.fontSize = `${sizeToken.replace("meta-size-", "")}px`;
           if (colorToken) s.color = `#${colorToken.replace("meta-color-", "")}`;
-          if (fillToken)
+          const isFillableCell = tokens.includes("meta-fillable");
+          if (fillToken && !(readOnly && isFillableCell))
             s.backgroundColor = `#${fillToken.replace("meta-fill-", "")}`;
+          if (readOnly && isFillableCell) s.backgroundColor = "#dbeafe";
           if (alignToken) s.textAlign = alignToken.replace("meta-align-", "");
           if (vAlignToken)
             s.verticalAlign = vAlignToken.replace("meta-valign-", "");

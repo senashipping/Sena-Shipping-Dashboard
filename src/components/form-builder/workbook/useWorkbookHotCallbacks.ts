@@ -68,12 +68,6 @@ export const useWorkbookHotCallbacks = ({
           scheduleUndoRedoRefresh();
         }
         if (readOnly && changes && source !== "updateData") {
-          if (source === "edit") {
-            // HOT fires `edit` on each keystroke while the inline editor is open.
-            // Persist on edit-end hooks instead of pushing parent updates per key.
-            pendingReadOnlyEmitRef.current = true;
-            return;
-          }
           const idx = activeSheetIndexRef.current;
           const sheet = workbookRef.current.sheets[idx];
           if (!sheet) return;
@@ -108,6 +102,12 @@ export const useWorkbookHotCallbacks = ({
               grid: newGrid,
             };
             readOnlyPreviewDirtyRef.current = true;
+            if (source === "edit") {
+              // Keep local workbook state in sync during typing, but do not emit
+              // to parent until editing has ended.
+              pendingReadOnlyEmitRef.current = true;
+              return;
+            }
             const isEditorStillOpen =
               typeof hot?.isEditorOpened === "function" &&
               hot.isEditorOpened();
