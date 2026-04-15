@@ -111,10 +111,11 @@ export const useWorkbookHotCallbacks = ({
             const isEditorStillOpen =
               typeof hot?.isEditorOpened === "function" &&
               hot.isEditorOpened();
-            if (isEditorStillOpen || isEditingRef.current) {
-              pendingReadOnlyEmitRef.current = true;
-            } else {
-              pendingReadOnlyEmitRef.current = false;
+            // Defer all parent syncs until a dedicated "editing finished" phase.
+            // This prevents focus/caret jumps when imported templates emit mixed
+            // change sources while users are still typing.
+            pendingReadOnlyEmitRef.current = true;
+            if (!isEditorStillOpen && !isEditingRef.current) {
               onReadOnlyEdit?.();
             }
           }

@@ -1005,10 +1005,25 @@ const HandsontableWorkbook = React.forwardRef<
   const scheduleReadOnlyEmit = React.useCallback(() => {
     flushReadOnlyEmitDebounce();
     readOnlyEmitDebounceTimerRef.current = setTimeout(() => {
+      const hot = hotRef.current?.hotInstance;
+      const editorOpen =
+        typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
+      if (readOnly && (editorOpen || isEditingRef.current)) {
+        // Keep deferring while editor is active; avoid parent-driven reloads
+        // that steal focus/caret during typing.
+        scheduleReadOnlyEmit();
+        return;
+      }
       readOnlyEmitDebounceTimerRef.current = null;
       emitWorkbookToParent();
     }, 120);
-  }, [emitWorkbookToParent, flushReadOnlyEmitDebounce]);
+  }, [
+    emitWorkbookToParent,
+    flushReadOnlyEmitDebounce,
+    hotRef,
+    isEditingRef,
+    readOnly,
+  ]);
 
   React.useEffect(
     () => () => {
