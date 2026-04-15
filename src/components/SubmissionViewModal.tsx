@@ -48,6 +48,18 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
   });
 
   const submission = submissionData?.data?.data;
+  const [editedSubmissionData, setEditedSubmissionData] = React.useState<Record<string, any>>({});
+
+  React.useEffect(() => {
+    if (!submission || !isOpen) return;
+    const raw = submission.data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      setEditedSubmissionData({});
+      return;
+    }
+    // Keep local editable copy so workbook edits can be exported immediately.
+    setEditedSubmissionData(JSON.parse(JSON.stringify(raw)));
+  }, [submission, isOpen]);
 
   if (!submission) {
     return (
@@ -134,6 +146,10 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
     submission.form?.fields,
     submission.form?.sections,
   );
+  const effectiveSubmission = {
+    ...submission,
+    data: editedSubmissionData,
+  };
 
   // Helper function to render form data
   const renderFormData = (data: any, fields: any[]) => {
@@ -195,7 +211,12 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
               >
                 <HandsontableWorkbook
                   data={workbookData}
-                  onChange={() => {}}
+                  onChange={(next) => {
+                    setEditedSubmissionData((prev) => ({
+                      ...prev,
+                      [field.name]: next,
+                    }));
+                  }}
                   readOnly
                   readOnlyHotHeight={excelPreviewHotHeight}
                 />
@@ -320,7 +341,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
       );
       const filename = `${formPart}-${shipPart}.pdf`;
       await downloadPdfDocument(
-        <SubmissionPdfDocument submission={submission} />,
+        <SubmissionPdfDocument submission={effectiveSubmission} />,
         filename
       );
       toast({ title: "PDF downloaded", variant: "success" });
@@ -493,19 +514,19 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
             </Card>
 
             {/* Submission Data */}
-            {(submission.form?.formType === 'regular' || !submission.form?.formType) && submission.data && (
+            {(submission.form?.formType === 'regular' || !submission.form?.formType) && effectiveSubmission.data && (
               <Card>
                 <CardHeader>
                   <CardTitle>Form Responses</CardTitle>
                   <CardDescription>Regular form field responses</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {renderFormData(submission.data, submission.form?.fields || [])}
+                  {renderFormData(effectiveSubmission.data, submission.form?.fields || [])}
                 </CardContent>
               </Card>
             )}
 
-            {submission.form?.formType === 'table' && submission.data && (
+            {submission.form?.formType === 'table' && effectiveSubmission.data && (
               <Card>
                 <CardHeader>
                   <CardTitle>Table Data</CardTitle>
@@ -513,7 +534,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
                 </CardHeader>
                 <CardContent>
                   {renderTableData(
-                    submission.data.tableData || [], 
+                    effectiveSubmission.data.tableData || [], 
                     submission.form?.tableConfig?.columns || [],
                     submission.form?.tableConfig?.preFilledData || []
                   )}
@@ -521,7 +542,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
               </Card>
             )}
 
-            {submission.form?.formType === 'mixed' && submission.data && submission.form?.sections && (
+            {submission.form?.formType === 'mixed' && effectiveSubmission.data && submission.form?.sections && (
               <>
                 {submission.form.sections.map((section: any) => (
                   <Card key={section.id}>
@@ -534,13 +555,13 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
                     <CardContent className="space-y-4">
                       {section.type === 'fields' && section.fields && (
                         <div className="space-y-4">
-                          {renderFormData(submission.data, section.fields)}
+                          {renderFormData(effectiveSubmission.data, section.fields)}
                         </div>
                       )}
                       {section.type === 'table' && section.tableConfig && (
                         <div>
                           {renderTableData(
-                            submission.data[`table_${section.id}`] || [],
+                            effectiveSubmission.data[`table_${section.id}`] || [],
                             section.tableConfig.columns || [],
                             section.tableConfig.preFilledData || []
                           )}
@@ -553,7 +574,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
             )}
 
             {/* Fallback: Raw Data Display */}
-            {submission.data && (!submission.form?.fields && !submission.form?.tableConfig && !submission.form?.sections) && (
+            {effectiveSubmission.data && (!submission.form?.fields && !submission.form?.tableConfig && !submission.form?.sections) && (
               <Card>
                 <CardHeader>
                   <CardTitle>Submission Data</CardTitle>
@@ -561,7 +582,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {Object.entries(submission.data).map(([key, value]) => {
+                    {Object.entries(effectiveSubmission.data).map(([key, value]) => {
                       // Handle table data specially
                       if (key.includes('table_') && Array.isArray(value)) {
                         return (
