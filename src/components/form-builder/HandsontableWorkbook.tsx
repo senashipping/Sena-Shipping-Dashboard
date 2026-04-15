@@ -192,7 +192,6 @@ const HandsontableWorkbook = React.forwardRef<
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const preserveScrollOnNextLoadRef = React.useRef(true);
   const disableEditorCompletely = readOnly && strictViewOnly;
-  console.log("disableEditorCompletely", disableEditorCompletely);
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),

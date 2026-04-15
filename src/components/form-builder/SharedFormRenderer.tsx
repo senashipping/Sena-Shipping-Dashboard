@@ -172,6 +172,35 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
     [excelReadOnly],
   );
 
+  // Keep a ref to `workbook` so the memoized onChange below never goes stale
+  // while also not needing `workbook` as a dep (which would recreate on every edit).
+  const workbookRef = React.useRef(workbook);
+  workbookRef.current = workbook;
+
+  // Stable onChange: does not recreate when parent re-renders with a new
+  // onFieldChange reference, preventing unnecessary HandsontableWorkbook
+  // re-renders and hotTableSettings churn that would close the active editor.
+  const handleWorkbookChange = React.useCallback(
+    (next: { sheets: any[] }) => {
+      if (useLocalExcelState) {
+        setLocalExcelState((prev) => {
+          const currentWorkbook =
+            prev[fieldName]?.sheets?.length
+              ? prev[fieldName]
+              : workbookRef.current;
+          const mergedWorkbook =
+            excelReadOnly && currentWorkbook?.sheets?.length
+              ? mergePreviewEditsIntoWorkbook(currentWorkbook, next)
+              : next;
+          return { ...prev, [fieldName]: mergedWorkbook };
+        });
+        return;
+      }
+      onFieldChange(fieldName, next);
+    },
+    [useLocalExcelState, setLocalExcelState, fieldName, excelReadOnly, onFieldChange],
+  );
+
   return (
     <div className="space-y-2">
       <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
@@ -180,21 +209,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
             data={data}
             readOnly={excelReadOnly}
             readOnlyHotHeight={readOnlyHotHeight}
-            onChange={(next) => {
-              if (useLocalExcelState) {
-                setLocalExcelState((prev) => {
-                  const currentWorkbook =
-                    prev[fieldName]?.sheets?.length ? prev[fieldName] : workbook;
-                  const mergedWorkbook =
-                    excelReadOnly && currentWorkbook?.sheets?.length
-                      ? mergePreviewEditsIntoWorkbook(currentWorkbook, next)
-                      : next;
-                  return { ...prev, [fieldName]: mergedWorkbook };
-                });
-                return;
-              }
-              onFieldChange(fieldName, next);
-            }}
+            onChange={handleWorkbookChange}
           />
         </React.Suspense>
       </div>
