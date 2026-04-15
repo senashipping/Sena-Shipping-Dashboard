@@ -48,18 +48,6 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
   });
 
   const submission = submissionData?.data?.data;
-  const [editedSubmissionData, setEditedSubmissionData] = React.useState<Record<string, any>>({});
-
-  React.useEffect(() => {
-    if (!submission || !isOpen) return;
-    const raw = submission.data;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      setEditedSubmissionData({});
-      return;
-    }
-    // Keep local editable copy so workbook edits can be exported immediately.
-    setEditedSubmissionData(JSON.parse(JSON.stringify(raw)));
-  }, [submission, isOpen]);
 
   if (!submission) {
     return (
@@ -146,10 +134,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
     submission.form?.fields,
     submission.form?.sections,
   );
-  const effectiveSubmission = {
-    ...submission,
-    data: editedSubmissionData,
-  };
+  const effectiveSubmission = submission;
 
   // Helper function to render form data
   const renderFormData = (data: any, fields: any[]) => {
@@ -211,12 +196,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
               >
                 <HandsontableWorkbook
                   data={workbookData}
-                  onChange={(next) => {
-                    setEditedSubmissionData((prev) => ({
-                      ...prev,
-                      [field.name]: next,
-                    }));
-                  }}
+                  onChange={() => {}}
                   readOnly
                   readOnlyHotHeight={excelPreviewHotHeight}
                 />
