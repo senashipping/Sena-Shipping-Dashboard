@@ -1001,7 +1001,7 @@ const HandsontableWorkbook = React.forwardRef<
     readOnlyEmitDebounceTimerRef.current = setTimeout(() => {
       readOnlyEmitDebounceTimerRef.current = null;
       emitWorkbookToParent();
-    }, 300);
+    }, 120);
   }, [emitWorkbookToParent, flushReadOnlyEmitDebounce]);
 
   React.useEffect(
@@ -2005,11 +2005,11 @@ const HandsontableWorkbook = React.forwardRef<
       className="space-y-2"
       onBlur={(e) => {
         if (!readOnly) return;
+        // In preview mode, blur can fire while HOT moves focus between internal
+        // editor elements and cells. Emitting here causes parent re-syncs that
+        // can jump selection/caret and make navigation skip cells.
         const next = e.relatedTarget as Node | null;
         if (next && e.currentTarget.contains(next)) return;
-        if (!readOnlyPreviewDirtyRef.current) return;
-        readOnlyPreviewDirtyRef.current = false;
-        scheduleReadOnlyEmit();
       }}
     >
       <style>{`
