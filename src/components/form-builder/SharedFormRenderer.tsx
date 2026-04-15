@@ -83,6 +83,54 @@ function truncateWorkbookForReadOnlyPreview(
   };
 }
 
+/**
+ * Read-only preview renders a truncated workbook for performance. When HOT emits
+ * edits, `next` only contains that truncated shape, so replacing local state with
+ * it would drop off-screen rows/metadata (including checkbox cell meta).
+ * Merge visible cell value edits back into the full workbook instead.
+ */
+function mergePreviewEditsIntoWorkbook(
+  baseWorkbook: { sheets: any[] },
+  editedPreviewWorkbook: { sheets: any[] },
+): { sheets: any[] } {
+  const baseSheets = Array.isArray(baseWorkbook?.sheets) ? baseWorkbook.sheets : [];
+  const editedSheets = Array.isArray(editedPreviewWorkbook?.sheets)
+    ? editedPreviewWorkbook.sheets
+    : [];
+
+  const mergedSheets = baseSheets.map((baseSheet: any, sheetIndex: number) => {
+    const editedSheet = editedSheets[sheetIndex];
+    if (!editedSheet) return baseSheet;
+
+    const baseGrid = Array.isArray(baseSheet?.grid) ? baseSheet.grid : [];
+    const editedGrid = Array.isArray(editedSheet?.grid) ? editedSheet.grid : [];
+    if (!editedGrid.length) return baseSheet;
+
+    const nextGrid = [...baseGrid];
+    for (let r = 0; r < editedGrid.length; r++) {
+      const editedRow = Array.isArray(editedGrid[r]) ? editedGrid[r] : [];
+      if (!Array.isArray(nextGrid[r])) {
+        nextGrid[r] = [];
+      } else {
+        nextGrid[r] = [...nextGrid[r]];
+      }
+      for (let c = 0; c < editedRow.length; c++) {
+        nextGrid[r][c] = editedRow[c];
+      }
+    }
+
+    return {
+      ...baseSheet,
+      grid: nextGrid,
+    };
+  });
+
+  return {
+    ...baseWorkbook,
+    sheets: mergedSheets,
+  };
+}
+
 /** Memoized so opening preview does not rebuild a truncated workbook object on every parent render. */
 const EmbeddedExcelHandsontableBlock: React.FC<{
   fieldName: string;
@@ -134,7 +182,15 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
           readOnlyHotHeight={readOnlyHotHeight}
           onChange={(next) => {
             if (useLocalExcelState) {
-              setLocalExcelState((prev) => ({ ...prev, [fieldName]: next }));
+              setLocalExcelState((prev) => {
+                const currentWorkbook =
+                  prev[fieldName]?.sheets?.length ? prev[fieldName] : workbook;
+                const mergedWorkbook =
+                  excelReadOnly && currentWorkbook?.sheets?.length
+                    ? mergePreviewEditsIntoWorkbook(currentWorkbook, next)
+                    : next;
+                return { ...prev, [fieldName]: mergedWorkbook };
+              });
               return;
             }
             onFieldChange(fieldName, next);

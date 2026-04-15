@@ -6,7 +6,6 @@ import { registerAllModules } from "handsontable/registry";
 import { checkboxRenderer, textRenderer } from "handsontable/renderers";
 import { Button } from "../ui/button";
 import { HyperFormula } from "hyperformula";
-import ExcelJS from "exceljs";
 import {
   HandsontableWorkbookProps,
   HandsontableWorkbookRef,
@@ -607,14 +606,14 @@ const HandsontableWorkbook = React.forwardRef<
         rowHeightsPx = current.rowHeightsPx || [];
       }
 
-      workbookRef.current.sheets[idx] = deepCloneSheet({
+      workbookRef.current.sheets[idx] = {
         ...current,
         grid: nextGrid,
         mergeCells,
         cellMeta,
         colWidthsPx,
         rowHeightsPx,
-      });
+      };
     },
     [readOnly],
   );
@@ -1291,6 +1290,7 @@ const HandsontableWorkbook = React.forwardRef<
 
   const exportXlsx = async () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
+    const { default: ExcelJS } = await import("exceljs");
     const workbook = new ExcelJS.Workbook();
     workbookRef.current.sheets.forEach((sheet) => {
       const ws = workbook.addWorksheet(sheet.name || "Sheet");

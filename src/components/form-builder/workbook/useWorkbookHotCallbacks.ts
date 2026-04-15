@@ -12,7 +12,9 @@ export const useWorkbookHotCallbacks = ({
   readOnlyPreviewDirtyRef,
 }: {
   hotRef: React.MutableRefObject<any>;
-  yesNoOppositeCellMapRef: React.MutableRefObject<Map<string, { row: number; col: number }>>;
+  yesNoOppositeCellMapRef: React.MutableRefObject<
+    Map<string, { row: number; col: number }>
+  >;
   readOnly: boolean;
   scheduleUndoRedoRefresh: () => void;
   activeSheetIndexRef: React.MutableRefObject<number>;
@@ -103,4 +105,3 @@ export const useWorkbookHotCallbacks = ({
 
   return { afterChange };
 };
-
