@@ -89,7 +89,13 @@ const HandsontableWorkbook = React.forwardRef<
   HandsontableWorkbookRef,
   HandsontableWorkbookProps
 >(function HandsontableWorkbook(
-  { data, onChange, readOnly = false, readOnlyHotHeight },
+  {
+    data,
+    onChange,
+    readOnly = false,
+    readOnlyHotHeight,
+    lightweightPerformance = false,
+  },
   ref,
 ) {
   type CellMetaEntry = NonNullable<SheetData["cellMeta"]>[number];
@@ -119,7 +125,22 @@ const HandsontableWorkbook = React.forwardRef<
     const first = workbookRef.current.sheets[0];
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
-    if (!readOnly) return cloneEditableGrid(base);
+    if (!readOnly) {
+      const editable = cloneEditableGrid(base);
+      if (!lightweightPerformance) return editable;
+      let lastNonEmptyCol = -1;
+      for (const row of editable) {
+        if (!Array.isArray(row)) continue;
+        for (let c = row.length - 1; c >= 0; c--) {
+          if (String(row[c] ?? "").trim() !== "") {
+            if (c > lastNonEmptyCol) lastNonEmptyCol = c;
+            break;
+          }
+        }
+      }
+      const keepCols = Math.max(1, lastNonEmptyCol + 1);
+      return editable.map((row) => (Array.isArray(row) ? row.slice(0, keepCols) : []));
+    }
     const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
     const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
     return base
@@ -172,6 +193,26 @@ const HandsontableWorkbook = React.forwardRef<
     Map<string, { row: number; col: number }>
   >(new Map());
   const suppressNextHotReloadRef = React.useRef(false);
+  const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
+  const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
+  const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
+
+  const trimTrailingEmptyColumns = React.useCallback((grid: string[][]) => {
+    if (!Array.isArray(grid) || grid.length === 0) return [[""]];
+    let lastNonEmptyCol = -1;
+    for (const row of grid) {
+      if (!Array.isArray(row)) continue;
+      for (let c = row.length - 1; c >= 0; c--) {
+        const cell = row[c];
+        if (String(cell ?? "").trim() !== "") {
+          if (c > lastNonEmptyCol) lastNonEmptyCol = c;
+          break;
+        }
+      }
+    }
+    const keepCols = Math.max(1, lastNonEmptyCol + 1);
+    return grid.map((row) => (Array.isArray(row) ? row.slice(0, keepCols) : []));
+  }, []);
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -441,6 +482,21 @@ const HandsontableWorkbook = React.forwardRef<
           cell == null ? "" : String(cell),
         ),
       );
+      if (!readOnly) {
+        const originalColCount = originalSheetColCountRef.current.get(idx) || 1;
+        const structureChanged = columnStructureDirtyRef.current.get(idx) === true;
+        if (!structureChanged && Number.isFinite(originalColCount) && originalColCount > 0) {
+          for (let r = 0; r < nextGrid.length; r++) {
+            const row = nextGrid[r];
+            if (!Array.isArray(row)) continue;
+            if (row.length >= originalColCount) continue;
+            nextGrid[r] = [
+              ...row,
+              ...Array.from({ length: originalColCount - row.length }, () => ""),
+            ];
+          }
+        }
+      }
 
       const mergeCells =
         hot
@@ -651,14 +707,18 @@ const HandsontableWorkbook = React.forwardRef<
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
       const base = sheet?.grid?.length ? sheet.grid : [[""]];
-      if (!readOnly) return cloneEditableGrid(base);
+      if (!readOnly) {
+        const editable = cloneEditableGrid(base);
+        if (!lightweightPerformance) return editable;
+        return trimTrailingEmptyColumns(editable);
+      }
       const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
       const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
       return base
         .slice(0, rows)
         .map((row) => (Array.isArray(row) ? row.slice(0, cols) : []));
     },
-    [readOnly],
+    [readOnly, lightweightPerformance, trimTrailingEmptyColumns],
   );
 
   const normalizeLegacyCheckboxValues = React.useCallback(
@@ -748,6 +808,14 @@ const HandsontableWorkbook = React.forwardRef<
       const savedScrollLeft = masterHolder?.scrollLeft ?? 0;
 
       const visibleGrid = toVisibleGrid(sheet);
+      const sourceColCount = Math.max(
+        1,
+        ...((sheet?.grid || []).map((row) =>
+          Array.isArray(row) ? row.length : 0,
+        ) || [1]),
+      );
+      originalSheetColCountRef.current.set(targetIndex, sourceColCount);
+      columnStructureDirtyRef.current.set(targetIndex, false);
       const formulaSet = new Set<string>();
       for (let r = 0; r < visibleGrid.length; r++) {
         const row = visibleGrid[r];
@@ -1446,10 +1514,24 @@ const HandsontableWorkbook = React.forwardRef<
   }, [activeSheetIndex, loadSheetIntoHot, incomingWorkbookKey]);
 
   // ─── cell renderer ───────────────────────────────────────────────────────────
+  React.useEffect(() => {
+    cellsCacheRef.current.clear();
+  }, [
+    activeSheetIndex,
+    persistedCellMetaMap,
+    fillableCellSet,
+    imageMap,
+    readOnly,
+    renderedColWidths,
+    renderedRowHeights,
+  ]);
 
   const cellsCallback = React.useCallback(
     (row: number, col: number) => {
-      const persistedMeta = persistedCellMetaMap.get(cellCoordKey(row, col));
+      const cacheKey = cellCoordKey(row, col);
+      const cached = cellsCacheRef.current.get(cacheKey);
+      if (cached) return cached;
+      const persistedMeta = persistedCellMetaMap.get(cacheKey);
       const cp: any = {};
       const persistedClassName = String(persistedMeta?.className || "");
       const classTokens = persistedClassName.split(" ").filter(Boolean);
@@ -1496,7 +1578,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (typeof persistedMeta?.strict === "boolean")
         cp.strict = persistedMeta.strict;
 
-      const image = imageMap.get(cellCoordKey(row, col));
+      const image = imageMap.get(cacheKey);
       if (image || !readOnly) {
         cp.renderer = (
           instance: any,
@@ -1618,6 +1700,7 @@ const HandsontableWorkbook = React.forwardRef<
           return td;
         };
       }
+      cellsCacheRef.current.set(cacheKey, cp);
       return cp;
     },
     [
@@ -1681,6 +1764,7 @@ const HandsontableWorkbook = React.forwardRef<
   }, [scheduleUndoRedoRefresh]);
 
   const afterCreateCol = React.useCallback(() => {
+    columnStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
     scheduleUndoRedoRefresh();
   }, [scheduleUndoRedoRefresh]);
 
@@ -1689,6 +1773,7 @@ const HandsontableWorkbook = React.forwardRef<
   }, [scheduleUndoRedoRefresh]);
 
   const afterRemoveCol = React.useCallback(() => {
+    columnStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
     scheduleUndoRedoRefresh();
   }, [scheduleUndoRedoRefresh]);
 
@@ -1824,6 +1909,88 @@ const HandsontableWorkbook = React.forwardRef<
       },
     };
   }, [readOnly]);
+
+  const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
+  const hotTableSettings = React.useMemo(
+    () => ({
+      data: initialGrid,
+      themeName: "ht-theme-main" as const,
+      rowHeaders: true,
+      colHeaders: true,
+      licenseKey: "non-commercial-and-evaluation" as const,
+      readOnly: false,
+      trimWhitespace: false,
+      width: hotViewportWidth > 0 ? hotViewportWidth : "100%",
+      stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
+      height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
+      renderAllRows: false,
+      viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
+      viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
+      formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
+      mergeCells: renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
+      filters: heavyPluginsEnabled,
+      dropdownMenu: heavyPluginsEnabled,
+      columnSorting: !readOnly,
+      hiddenRows: !readOnly ? ({ indicators: true } as const) : undefined,
+      hiddenColumns: !readOnly ? ({ indicators: true } as const) : undefined,
+      multiColumnSorting: !readOnly,
+      manualColumnFreeze: !readOnly,
+      autoColumnSize: false,
+      autoRowSize: false,
+      fillHandle: !readOnly,
+      fixedRowsTop: 0,
+      fixedColumnsStart: 0,
+      contextMenu: hotTableContextMenu,
+      className: "ht-theme-main",
+      manualRowResize: !readOnly && !lightweightPerformance,
+      manualColumnResize: !readOnly && !lightweightPerformance,
+      colWidths: renderedColWidths as any,
+      rowHeights: renderedRowHeights as any,
+      wordWrap: true,
+      autoWrapRow: true,
+      autoWrapCol: true,
+      cells: cellsCallback,
+      afterGetCellMeta,
+      afterColumnResize,
+      afterRowResize,
+      afterChange,
+      afterSelection,
+      afterSelectionEnd,
+      afterMergeCells,
+      afterUnmergeCells,
+      afterCreateRow,
+      afterCreateCol,
+      afterRemoveRow,
+      afterRemoveCol,
+    }),
+    [
+      initialGrid,
+      hotViewportWidth,
+      stretchColumnsInPreview,
+      readOnly,
+      readOnlyHotHeight,
+      shouldUseFormulaEngine,
+      renderedMergeCells,
+      heavyPluginsEnabled,
+      hotTableContextMenu,
+      lightweightPerformance,
+      renderedColWidths,
+      renderedRowHeights,
+      cellsCallback,
+      afterGetCellMeta,
+      afterColumnResize,
+      afterRowResize,
+      afterChange,
+      afterSelection,
+      afterSelectionEnd,
+      afterMergeCells,
+      afterUnmergeCells,
+      afterCreateRow,
+      afterCreateCol,
+      afterRemoveRow,
+      afterRemoveCol,
+    ],
+  );
 
   // ─── render ──────────────────────────────────────────────────────────────────
 
@@ -2338,58 +2505,7 @@ const HandsontableWorkbook = React.forwardRef<
              * leak onto another at the same coordinates. */
             key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
             ref={hotRef}
-            data={initialGrid}
-            themeName="ht-theme-main"
-            rowHeaders
-            colHeaders
-            licenseKey="non-commercial-and-evaluation"
-            readOnly={false}
-            trimWhitespace={false}
-            width="100%"
-            stretchH={stretchColumnsInPreview ? "all" : "none"}
-            height={readOnly ? (readOnlyHotHeight ?? 380) : 320}
-            formulas={shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined}
-            mergeCells={
-              renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly
-            }
-            filters={!readOnly}
-            dropdownMenu={!readOnly}
-            columnSorting={!readOnly}
-            {...(!readOnly
-              ? {
-                  hiddenRows: { indicators: true } as const,
-                  hiddenColumns: { indicators: true } as const,
-                }
-              : {})}
-            multiColumnSorting={!readOnly}
-            manualColumnFreeze={!readOnly}
-            autoColumnSize={false}
-            autoRowSize={false}
-            fillHandle={!readOnly}
-            fixedRowsTop={0}
-            fixedColumnsStart={0}
-            contextMenu={hotTableContextMenu}
-            className="ht-theme-main"
-            manualRowResize={!readOnly}
-            manualColumnResize={!readOnly}
-            colWidths={renderedColWidths as any}
-            rowHeights={renderedRowHeights as any}
-            wordWrap
-            autoWrapRow
-            autoWrapCol
-            cells={cellsCallback}
-            afterGetCellMeta={afterGetCellMeta}
-            afterColumnResize={afterColumnResize}
-            afterRowResize={afterRowResize}
-            afterChange={afterChange}
-            afterSelection={afterSelection}
-            afterSelectionEnd={afterSelectionEnd}
-            afterMergeCells={afterMergeCells}
-            afterUnmergeCells={afterUnmergeCells}
-            afterCreateRow={afterCreateRow}
-            afterCreateCol={afterCreateCol}
-            afterRemoveRow={afterRemoveRow}
-            afterRemoveCol={afterRemoveCol}
+            {...hotTableSettings}
           />
         </div>
       </div>

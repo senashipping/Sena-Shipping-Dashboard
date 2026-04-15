@@ -24,7 +24,10 @@ import { Button } from "./ui/button";
 import SubmissionPdfDocument from "./pdf/SubmissionPdfDocument";
 import { downloadPdfDocument } from "../lib/pdfDownload";
 import { useToast } from "./ui/toast";
-import HandsontableWorkbook from "./form-builder/HandsontableWorkbook";
+
+const HandsontableWorkbook = React.lazy(
+  () => import("./form-builder/HandsontableWorkbook"),
+);
 
 interface SubmissionViewModalProps {
   submissionId: string | null;
@@ -187,12 +190,16 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
               : field.excelTemplate;
           value = workbookData?.sheets?.length ? (
             <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
-              <HandsontableWorkbook
-                data={workbookData}
-                onChange={() => {}}
-                readOnly
-                readOnlyHotHeight={excelPreviewHotHeight}
-              />
+              <React.Suspense
+                fallback={<div className="p-2 text-sm">Loading workbook...</div>}
+              >
+                <HandsontableWorkbook
+                  data={workbookData}
+                  onChange={() => {}}
+                  readOnly
+                  readOnlyHotHeight={excelPreviewHotHeight}
+                />
+              </React.Suspense>
             </div>
           ) : (
             <span className="text-muted-foreground">No Excel template configured</span>

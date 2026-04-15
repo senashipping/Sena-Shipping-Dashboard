@@ -16,14 +16,13 @@ import { Button } from "../ui/button";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { FormField, FormSection, TableConfig } from "../../types";
 import { Alert, AlertDescription } from "../ui/alert";
-import HandsontableWorkbook, {
-  MAX_PREVIEW_COLS,
-  MAX_PREVIEW_ROWS,
-} from "./HandsontableWorkbook";
+import { MAX_PREVIEW_COLS, MAX_PREVIEW_ROWS } from "./workbook/workbookTypes";
 import {
   EXCEL_PREVIEW_SHEET_FRAME_CLASS,
   getExcelPreviewHotHeightPx,
 } from "./excelSheetPreviewLayout";
+
+const HandsontableWorkbook = React.lazy(() => import("./HandsontableWorkbook"));
 
 /** Shrink template workbooks before read-only preview so Handsontable/normalize never walks huge grids. */
 function truncateWorkbookForReadOnlyPreview(
@@ -176,26 +175,28 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   return (
     <div className="space-y-2">
       <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
-        <HandsontableWorkbook
-          data={data}
-          readOnly={excelReadOnly}
-          readOnlyHotHeight={readOnlyHotHeight}
-          onChange={(next) => {
-            if (useLocalExcelState) {
-              setLocalExcelState((prev) => {
-                const currentWorkbook =
-                  prev[fieldName]?.sheets?.length ? prev[fieldName] : workbook;
-                const mergedWorkbook =
-                  excelReadOnly && currentWorkbook?.sheets?.length
-                    ? mergePreviewEditsIntoWorkbook(currentWorkbook, next)
-                    : next;
-                return { ...prev, [fieldName]: mergedWorkbook };
-              });
-              return;
-            }
-            onFieldChange(fieldName, next);
-          }}
-        />
+        <React.Suspense fallback={<div className="p-2 text-sm">Loading workbook...</div>}>
+          <HandsontableWorkbook
+            data={data}
+            readOnly={excelReadOnly}
+            readOnlyHotHeight={readOnlyHotHeight}
+            onChange={(next) => {
+              if (useLocalExcelState) {
+                setLocalExcelState((prev) => {
+                  const currentWorkbook =
+                    prev[fieldName]?.sheets?.length ? prev[fieldName] : workbook;
+                  const mergedWorkbook =
+                    excelReadOnly && currentWorkbook?.sheets?.length
+                      ? mergePreviewEditsIntoWorkbook(currentWorkbook, next)
+                      : next;
+                  return { ...prev, [fieldName]: mergedWorkbook };
+                });
+                return;
+              }
+              onFieldChange(fieldName, next);
+            }}
+          />
+        </React.Suspense>
       </div>
       {templateExceedsPreview && (
         <p className="text-xs text-amber-800 border border-amber-200 rounded bg-amber-50 px-2 py-1">

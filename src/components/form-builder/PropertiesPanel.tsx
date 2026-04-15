@@ -17,10 +17,9 @@ import {
 import { FormField, FormSection, TableConfig, TableColumn } from "../../types";
 import { useToast } from "../ui/toast";
 import * as XLSX from "xlsx";
-import ExcelJS from "exceljs";
-import HandsontableWorkbook, {
-  type HandsontableWorkbookRef,
-} from "./HandsontableWorkbook";
+import type { HandsontableWorkbookRef } from "./workbook/workbookTypes";
+
+const HandsontableWorkbook = React.lazy(() => import("./HandsontableWorkbook"));
 
 interface PropertiesPanelProps {
   selectedItem: {
@@ -147,8 +146,11 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: "array", cellDates: true, cellStyles: true });
       const imageMapBySheet = new Map<string, Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }>>();
-      const excelJsSheetMap = new Map<string, ExcelJS.Worksheet>();
+      const excelJsSheetMap = new Map<string, any>();
+      let excelJsBooleanValueType: unknown = undefined;
       try {
+        const { default: ExcelJS } = await import("exceljs");
+        excelJsBooleanValueType = (ExcelJS as any)?.ValueType?.Boolean;
         const excelJsWorkbook = new ExcelJS.Workbook();
         await excelJsWorkbook.xlsx.load(buffer as ArrayBuffer);
         for (const ws of excelJsWorkbook.worksheets) {
@@ -224,7 +226,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             const excelJsCell = excelJsSheet?.getCell(addr);
             const excelJsComparableValue = getExcelJsComparableValue(excelJsCell?.value);
             const isExcelBooleanCell =
-              excelJsCell?.type === ExcelJS.ValueType.Boolean ||
+              (excelJsBooleanValueType != null && excelJsCell?.type === excelJsBooleanValueType) ||
               excelJsComparableValue === true ||
               excelJsComparableValue === false;
             const booleanStringValue =
@@ -691,12 +693,17 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </DialogHeader>
             <div className="max-h-[65vh] overflow-auto">
               {workbookDraft?.sheets?.length ? (
-                <HandsontableWorkbook
-                  ref={workbookEditorRef}
-                  data={workbookDraft}
-                  onChange={(next) => setWorkbookDraft(next)}
-                  readOnly={false}
-                />
+                <React.Suspense
+                  fallback={<div className="p-3 text-sm text-muted-foreground">Loading workbook editor...</div>}
+                >
+                  <HandsontableWorkbook
+                    ref={workbookEditorRef as any}
+                    data={workbookDraft}
+                    onChange={(next) => setWorkbookDraft(next)}
+                    readOnly={false}
+                    lightweightPerformance
+                  />
+                </React.Suspense>
               ) : (
                 <div className="p-3 text-sm text-muted-foreground border rounded-md bg-muted/30">
                   No workbook data available. Create or import a workbook first.
