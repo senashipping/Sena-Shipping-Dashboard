@@ -193,6 +193,9 @@ const HandsontableWorkbook = React.forwardRef<
     Map<string, { row: number; col: number }>
   >(new Map());
   const suppressNextHotReloadRef = React.useRef(false);
+  const readOnlyEmitDebounceTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
@@ -897,11 +900,18 @@ const HandsontableWorkbook = React.forwardRef<
       lastSelectionRef.current = nextRange;
       sheetSelectionRef.current[targetIndex] = nextRange;
       setSelectionLabel(toRangeLabel(nextRange));
+      if (typeof hot.refreshDimensions === "function") {
+        hot.refreshDimensions();
+      }
 
       // Restore scroll after React's HotTable re-render (which triggers a
       // second internal loadData when it detects the new `data` prop).
       // Only restore if the sheet didn't change (user was already on this tab).
-      if (savedScrollTop > 0 || savedScrollLeft > 0) {
+      const shouldRestoreScroll =
+        Boolean(saved) &&
+        targetIndex === activeSheetIndexRef.current &&
+        (savedScrollTop > 0 || savedScrollLeft > 0);
+      if (shouldRestoreScroll) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             const h = hotRef.current?.hotInstance;
@@ -911,6 +921,19 @@ const HandsontableWorkbook = React.forwardRef<
             if (holder) {
               holder.scrollTop = savedScrollTop;
               holder.scrollLeft = savedScrollLeft;
+            }
+          });
+        });
+      } else {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const h = hotRef.current?.hotInstance;
+            const holder = h?.rootElement?.querySelector?.(
+              ".wtHolder",
+            ) as HTMLElement | null;
+            if (holder) {
+              holder.scrollTop = 0;
+              holder.scrollLeft = 0;
             }
           });
         });
@@ -1001,14 +1024,22 @@ const HandsontableWorkbook = React.forwardRef<
     }
   }, []);
 
+  const flushReadOnlyEmitDebounce = React.useCallback(() => {
+    if (readOnlyEmitDebounceTimerRef.current) {
+      clearTimeout(readOnlyEmitDebounceTimerRef.current);
+      readOnlyEmitDebounceTimerRef.current = null;
+    }
+  }, []);
+
   React.useEffect(
     () => () => {
       flushPendingColorTimers();
+      flushReadOnlyEmitDebounce();
       if (undoRedoRefreshTimerRef.current) {
         clearTimeout(undoRedoRefreshTimerRef.current);
       }
     },
-    [flushPendingColorTimers],
+    [flushPendingColorTimers, flushReadOnlyEmitDebounce],
   );
 
   const scheduleApplyTextColorValue = React.useCallback(
@@ -2003,7 +2034,11 @@ const HandsontableWorkbook = React.forwardRef<
         if (next && e.currentTarget.contains(next)) return;
         if (!readOnlyPreviewDirtyRef.current) return;
         readOnlyPreviewDirtyRef.current = false;
-        emitWorkbookToParent();
+        flushReadOnlyEmitDebounce();
+        readOnlyEmitDebounceTimerRef.current = setTimeout(() => {
+          readOnlyEmitDebounceTimerRef.current = null;
+          emitWorkbookToParent();
+        }, 300);
       }}
     >
       <style>{`
