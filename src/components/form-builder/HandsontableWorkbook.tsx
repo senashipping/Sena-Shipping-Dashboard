@@ -91,6 +91,7 @@ const HandsontableWorkbook = React.forwardRef<
     data,
     onChange,
     readOnly = false,
+    strictViewOnly = false,
     readOnlyHotHeight,
     lightweightPerformance = false,
   },
@@ -180,6 +181,9 @@ const HandsontableWorkbook = React.forwardRef<
     Map<string, { row: number; col: number }>
   >(new Map());
   const suppressNextHotReloadRef = React.useRef(false);
+  const pendingIncomingReloadRef = React.useRef(false);
+  const isEditingRef = React.useRef(false);
+  const pendingReadOnlyEmitRef = React.useRef(false);
   const readOnlyEmitDebounceTimerRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -1514,8 +1518,15 @@ const HandsontableWorkbook = React.forwardRef<
       suppressNextHotReloadRef.current = false;
       return;
     }
+    const hot = hotRef.current?.hotInstance;
+    const isEditorOpen =
+      typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
+    if (readOnly && (isEditorOpen || isEditingRef.current)) {
+      pendingIncomingReloadRef.current = true;
+      return;
+    }
     loadSheetIntoHot(activeSheetIndex);
-  }, [activeSheetIndex, loadSheetIntoHot, incomingWorkbookKey]);
+  }, [activeSheetIndex, loadSheetIntoHot, incomingWorkbookKey, readOnly]);
 
   // ─── cell renderer ───────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -1789,8 +1800,52 @@ const HandsontableWorkbook = React.forwardRef<
     activeSheetIndexRef,
     workbookRef,
     readOnlyPreviewDirtyRef,
+    isEditingRef,
+    pendingReadOnlyEmitRef,
     onReadOnlyEdit: scheduleReadOnlyEmit,
   });
+
+  const flushPendingPreviewSyncs = React.useCallback(() => {
+    if (pendingReadOnlyEmitRef.current) {
+      pendingReadOnlyEmitRef.current = false;
+      scheduleReadOnlyEmit();
+    }
+    if (pendingIncomingReloadRef.current) {
+      pendingIncomingReloadRef.current = false;
+      loadSheetIntoHot(activeSheetIndexRef.current);
+    }
+  }, [loadSheetIntoHot, scheduleReadOnlyEmit]);
+
+  const beforeBeginEditing = React.useCallback(() => {
+    if (!readOnly) return;
+    isEditingRef.current = true;
+  }, [readOnly]);
+
+  const afterDeselect = React.useCallback(() => {
+    if (!readOnly) return;
+    isEditingRef.current = false;
+    flushPendingPreviewSyncs();
+  }, [readOnly, flushPendingPreviewSyncs]);
+
+  const afterChangeWithEditTracking = React.useCallback(
+    (changes: any, source: string) => {
+      afterChange(changes, source);
+      if (!readOnly) return;
+      if (source === "edit" || source === "Autofill.fill") {
+        isEditingRef.current = false;
+      }
+      setTimeout(() => {
+        const hot = hotRef.current?.hotInstance;
+        const editorOpen =
+          typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
+        if (!editorOpen) {
+          isEditingRef.current = false;
+          flushPendingPreviewSyncs();
+        }
+      }, 0);
+    },
+    [afterChange, flushPendingPreviewSyncs, readOnly],
+  );
 
   const afterSelection = React.useCallback(
     (r: number, c: number, r2: number, c2: number) => {
@@ -1916,6 +1971,7 @@ const HandsontableWorkbook = React.forwardRef<
   }, [readOnly]);
 
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
+  const disableEditorCompletely = readOnly && strictViewOnly;
   const hotTableSettings = React.useMemo(
     () => ({
       data: initialGrid,
@@ -1923,7 +1979,9 @@ const HandsontableWorkbook = React.forwardRef<
       rowHeaders: true,
       colHeaders: true,
       licenseKey: "non-commercial-and-evaluation" as const,
-      readOnly: false,
+      readOnly: disableEditorCompletely ? true : false,
+      disableVisualSelection: disableEditorCompletely ? false : undefined,
+      editor: disableEditorCompletely ? false : undefined,
       trimWhitespace: false,
       width: hotViewportWidth > 0 ? hotViewportWidth : "100%",
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
@@ -1959,9 +2017,15 @@ const HandsontableWorkbook = React.forwardRef<
       afterGetCellMeta,
       afterColumnResize,
       afterRowResize,
-      afterChange,
+      afterChange: disableEditorCompletely
+        ? undefined
+        : afterChangeWithEditTracking,
       afterSelection,
       afterSelectionEnd,
+      beforeBeginEditing: disableEditorCompletely
+        ? undefined
+        : beforeBeginEditing,
+      afterDeselect: disableEditorCompletely ? undefined : afterDeselect,
       afterMergeCells,
       afterUnmergeCells,
       afterCreateRow,
@@ -1980,15 +2044,18 @@ const HandsontableWorkbook = React.forwardRef<
       heavyPluginsEnabled,
       hotTableContextMenu,
       lightweightPerformance,
+      disableEditorCompletely,
       renderedColWidths,
       renderedRowHeights,
       cellsCallback,
       afterGetCellMeta,
       afterColumnResize,
       afterRowResize,
-      afterChange,
+      afterChangeWithEditTracking,
       afterSelection,
       afterSelectionEnd,
+      beforeBeginEditing,
+      afterDeselect,
       afterMergeCells,
       afterUnmergeCells,
       afterCreateRow,

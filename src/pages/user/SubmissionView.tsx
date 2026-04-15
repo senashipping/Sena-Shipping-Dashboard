@@ -28,6 +28,7 @@ const SubmissionView: React.FC = () => {
       submissionId={submissionId}
       isOpen={isOpen}
       onClose={handleClose}
+      strictWorkbookViewOnly
     />
   );
 };

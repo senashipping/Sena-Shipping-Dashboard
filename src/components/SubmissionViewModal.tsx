@@ -33,12 +33,14 @@ interface SubmissionViewModalProps {
   submissionId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  strictWorkbookViewOnly?: boolean;
 }
 
 const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
   submissionId,
   isOpen,
   onClose,
+  strictWorkbookViewOnly = false,
 }) => {
   const { toast } = useToast();
   const { data: submissionData, isLoading } = useQuery({
@@ -198,6 +200,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
                   data={workbookData}
                   onChange={() => {}}
                   readOnly
+                  strictViewOnly={strictWorkbookViewOnly}
                   readOnlyHotHeight={excelPreviewHotHeight}
                 />
               </React.Suspense>

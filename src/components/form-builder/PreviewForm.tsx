@@ -21,6 +21,7 @@ const PreviewForm: FC<PreviewFormProps> = ({
   onSubmit,
   isSubmitting = false,
 }) => {
+  console.log("parent rendered");
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
 

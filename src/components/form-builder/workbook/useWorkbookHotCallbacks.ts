@@ -10,6 +10,8 @@ export const useWorkbookHotCallbacks = ({
   activeSheetIndexRef,
   workbookRef,
   readOnlyPreviewDirtyRef,
+  isEditingRef,
+  pendingReadOnlyEmitRef,
   onReadOnlyEdit,
 }: {
   hotRef: React.MutableRefObject<any>;
@@ -21,12 +23,15 @@ export const useWorkbookHotCallbacks = ({
   activeSheetIndexRef: React.MutableRefObject<number>;
   workbookRef: React.MutableRefObject<{ sheets: SheetData[] }>;
   readOnlyPreviewDirtyRef: React.MutableRefObject<boolean>;
+  isEditingRef: React.MutableRefObject<boolean>;
+  pendingReadOnlyEmitRef: React.MutableRefObject<boolean>;
   onReadOnlyEdit?: () => void;
 }) => {
   const afterChange = React.useCallback(
     (changes: any, source: string) => {
       setTimeout(() => {
         if (source === "loadData") return;
+        const hot = hotRef.current?.hotInstance;
 
         if (
           Array.isArray(changes) &&
@@ -34,7 +39,6 @@ export const useWorkbookHotCallbacks = ({
           source !== "updateData" &&
           String(source) !== "yesNoSync"
         ) {
-          const hot = hotRef.current?.hotInstance;
           if (hot) {
             const oppositeCellByKey = yesNoOppositeCellMapRef.current;
             for (const [row, col, oldValue, newValue] of changes as [
@@ -102,7 +106,15 @@ export const useWorkbookHotCallbacks = ({
               grid: newGrid,
             };
             readOnlyPreviewDirtyRef.current = true;
-            onReadOnlyEdit?.();
+            const isEditorStillOpen =
+              typeof hot?.isEditorOpened === "function" &&
+              hot.isEditorOpened();
+            if (isEditorStillOpen || isEditingRef.current) {
+              pendingReadOnlyEmitRef.current = true;
+            } else {
+              pendingReadOnlyEmitRef.current = false;
+              onReadOnlyEdit?.();
+            }
           }
         }
       }, 0);
@@ -112,6 +124,8 @@ export const useWorkbookHotCallbacks = ({
       hotRef,
       readOnly,
       readOnlyPreviewDirtyRef,
+      isEditingRef,
+      pendingReadOnlyEmitRef,
       onReadOnlyEdit,
       scheduleUndoRedoRefresh,
       workbookRef,
