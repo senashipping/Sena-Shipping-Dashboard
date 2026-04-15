@@ -29,19 +29,17 @@ const C = {
   sheetTitle: "#0f2341",
 };
 
-const MAX_ROWS = 260;
-const MAX_COLS = 56;
-const BASE_ROW_MIN_PT = 11;
-const BASE_CELL_FONT_PT = 5.5;
-const BASE_CELL_PADDING_PT = 1.5;
-const BASE_TITLE_FONT_PT = 7;
+const BASE_ROW_MIN_PT = 13;
+const BASE_CELL_FONT_PT = 6.5;
+const BASE_CELL_PADDING_PT = 2;
+const BASE_TITLE_FONT_PT = 8;
 const BASE_TITLE_PAD_H = 4;
 const BASE_TITLE_PAD_V = 3;
-const BASE_IMAGE_W = 36;
-const BASE_IMAGE_H = 14;
-const FIT_TARGET_ROWS = 46;
-const FIT_TARGET_COLS = 16;
-const FIT_MIN_SCALE = 0.44;
+const BASE_IMAGE_W = 44;
+const BASE_IMAGE_H = 16;
+const FIT_TARGET_ROWS = 62;
+const FIT_TARGET_COLS = 22;
+const FIT_MIN_SCALE = 0.28;
 
 const es = StyleSheet.create({
   sheetBlock: {
@@ -102,10 +100,12 @@ function clamp(n: number, min: number, max: number): number {
  * Heuristic fit: many rows and many columns both increase page pressure.
  * Scale down smoothly so dense sheets still fit a single PDF page.
  */
-function computeSheetScaleMetrics(rows: number, cols: number): SheetScaleMetrics {
+function computeSheetScaleMetrics(rows: number, cols: number, maxCellChars: number): SheetScaleMetrics {
   const rowScale = rows > FIT_TARGET_ROWS ? FIT_TARGET_ROWS / rows : 1;
   const colScale = cols > FIT_TARGET_COLS ? FIT_TARGET_COLS / cols : 1;
-  const scale = clamp(Math.min(rowScale, colScale), FIT_MIN_SCALE, 1);
+  // Long text in narrow columns raises effective row height due to wrapping.
+  const textScale = maxCellChars > 28 ? 28 / maxCellChars : 1;
+  const scale = clamp(Math.min(rowScale, colScale, textScale), FIT_MIN_SCALE, 1);
   return {
     rowMinPt: BASE_ROW_MIN_PT * scale,
     cellFontPt: BASE_CELL_FONT_PT * scale,
@@ -264,7 +264,6 @@ function SheetTable({
   merges,
   fillable,
   imagesByKey,
-  truncated,
   metrics,
 }: {
   name: string;
@@ -272,7 +271,6 @@ function SheetTable({
   merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>;
   fillable: Set<string>;
   imagesByKey: Map<string, EmbeddedSheetImage>;
-  truncated: boolean;
   metrics: SheetScaleMetrics;
 }) {
   const rows = grid.length;
@@ -366,24 +364,23 @@ function SheetTable({
         {name}
       </Text>
       <View style={es.table}>{body}</View>
-      {truncated ? (
-        <Text style={es.truncateNote}>
-          Grid truncated for PDF ({MAX_ROWS} rows × {MAX_COLS} columns max).
-        </Text>
-      ) : null}
     </View>
   );
 }
 
 export type EmbeddedExcelWorkbookPdfProps = {
   workbook: EmbeddedExcelPdfWorkbook | null | undefined;
+  breakBeforeFirstSheet?: boolean;
 };
 
 /**
  * Renders embedded Excel workbook sheets as bordered tables in React-PDF (submission / template export).
  * Respects merge regions and `meta-fillable` cell highlighting.
  */
-export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> = ({ workbook }) => {
+export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> = ({
+  workbook,
+  breakBeforeFirstSheet = false,
+}) => {
   const sheets = workbook?.sheets;
   if (!Array.isArray(sheets) || sheets.length === 0) {
     return (
@@ -398,18 +395,18 @@ export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> =
       {sheets.map((raw, idx) => {
         const n = normalizeSheet(raw, idx);
         let grid = n.grid;
-        let truncated = false;
-        const origMaxCol = grid.reduce((w, row) => Math.max(w, row.length), 0);
-        if (grid.length > MAX_ROWS || origMaxCol > MAX_COLS) {
-          truncated = true;
-          grid = grid.slice(0, MAX_ROWS).map((row) => [...row].slice(0, MAX_COLS));
-        }
         const gridRows = grid.length;
         let gridCols = Math.max(
           1,
           grid.reduce((w, row) => Math.max(w, row.length), 0),
         );
-        const metrics = computeSheetScaleMetrics(gridRows, gridCols);
+        const maxCellChars = Math.max(
+          1,
+          ...grid.map((row) =>
+            row.reduce((m, cell) => Math.max(m, typeof cell === "string" ? cell.length : 0), 0),
+          ),
+        );
+        const metrics = computeSheetScaleMetrics(gridRows, gridCols, maxCellChars);
         grid = grid.map((row) => {
           const r = [...row];
           while (r.length < gridCols) r.push("");
@@ -427,14 +424,13 @@ export const EmbeddedExcelWorkbookPdf: React.FC<EmbeddedExcelWorkbookPdfProps> =
           if (rs < gridRows && cs < gridCols) imgs.set(k, v);
         }
         return (
-          <View key={`${n.name}-${idx}`} wrap={false} break={idx > 0}>
+          <View key={`${n.name}-${idx}`} wrap={false} break={breakBeforeFirstSheet || idx > 0}>
             <SheetTable
               name={n.name}
               grid={grid}
               merges={merges}
               fillable={fill}
               imagesByKey={imgs}
-              truncated={truncated}
               metrics={metrics}
             />
           </View>
