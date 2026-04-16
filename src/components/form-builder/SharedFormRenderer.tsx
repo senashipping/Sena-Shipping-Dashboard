@@ -16,71 +16,11 @@ import { Button } from "../ui/button";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { FormField, FormSection, TableConfig } from "../../types";
 import { Alert, AlertDescription } from "../ui/alert";
-import { MAX_PREVIEW_COLS, MAX_PREVIEW_ROWS } from "./workbook/workbookTypes";
 import {
   EXCEL_PREVIEW_SHEET_FRAME_CLASS,
   getExcelPreviewHotHeightPx,
 } from "./excelSheetPreviewLayout";
-
-const HandsontableWorkbook = React.lazy(() => import("./HandsontableWorkbook"));
-
-/** Shrink template workbooks before read-only preview so Handsontable/normalize never walks huge grids. */
-function truncateWorkbookForReadOnlyPreview(
-  workbook: { sheets: any[] },
-  maxRows: number,
-  maxCols: number,
-): { sheets: any[] } {
-  if (!workbook?.sheets?.length) return workbook;
-  return {
-    sheets: workbook.sheets.map((sheet: any) => {
-      const grid = Array.isArray(sheet.grid) ? sheet.grid : [];
-      const rows = Math.min(maxRows, grid.length);
-      const cols = Math.min(maxCols, grid[0]?.length ?? 0);
-      const slicedGrid = grid
-        .slice(0, rows)
-        .map((row: any[]) => (Array.isArray(row) ? row.slice(0, cols) : []));
-      const mergeCells = (sheet.mergeCells || []).filter(
-        (m: any) =>
-          m &&
-          Number.isFinite(+m.row) &&
-          Number.isFinite(+m.col) &&
-          m.row < rows &&
-          m.col < cols &&
-          m.row + m.rowspan <= rows &&
-          m.col + m.colspan <= cols,
-      );
-      const cellMeta = (sheet.cellMeta || []).filter(
-        (m: any) =>
-          m &&
-          Number.isFinite(+m.row) &&
-          Number.isFinite(+m.col) &&
-          m.row < rows &&
-          m.col < cols,
-      );
-      const images = (sheet.images || []).filter(
-        (img: any) =>
-          img &&
-          Number.isFinite(+img.row) &&
-          Number.isFinite(+img.col) &&
-          img.row < rows &&
-          img.col < cols,
-      );
-      return {
-        ...sheet,
-        grid: slicedGrid,
-        mergeCells,
-        cellMeta,
-        images,
-        colWidthsPx: Array.isArray(sheet.colWidthsPx)
-          ? sheet.colWidthsPx.slice(0, cols)
-          : undefined,
-        rowHeightsPx: Array.isArray(sheet.rowHeightsPx)
-          ? sheet.rowHeightsPx.slice(0, rows)
-          : undefined,
-      };
-    }),
-  };
-}
+import HandsontableWorkbook from "./HandsontableWorkbook";
 
 /**
  * Read-only preview renders a truncated workbook for performance. When HOT emits
@@ -146,26 +86,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   setLocalExcelState,
   onFieldChange,
 }) {
-  const data = React.useMemo(() => {
-    if (useLocalExcelState && excelReadOnly) {
-      return truncateWorkbookForReadOnlyPreview(
-        workbook,
-        MAX_PREVIEW_ROWS,
-        MAX_PREVIEW_COLS,
-      );
-    }
-    return workbook;
-  }, [workbook, useLocalExcelState, excelReadOnly]);
-
-  const templateExceedsPreview = React.useMemo(() => {
-    if (!useLocalExcelState || !excelReadOnly) return false;
-    return workbook.sheets.some((s: any) => {
-      const g = s?.grid;
-      if (!Array.isArray(g) || g.length === 0) return false;
-      const cols0 = Array.isArray(g[0]) ? g[0].length : 0;
-      return g.length > MAX_PREVIEW_ROWS || cols0 > MAX_PREVIEW_COLS;
-    });
-  }, [workbook, useLocalExcelState, excelReadOnly]);
+  const data = workbook;
 
   const readOnlyHotHeight = React.useMemo(
     () => (excelReadOnly ? getExcelPreviewHotHeightPx() : undefined),
@@ -204,22 +125,13 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   return (
     <div className="space-y-2">
       <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
-        <React.Suspense fallback={<div className="p-2 text-sm">Loading workbook...</div>}>
-          <HandsontableWorkbook
-            data={data}
-            readOnly={excelReadOnly}
-            readOnlyHotHeight={readOnlyHotHeight}
-            onChange={handleWorkbookChange}
-          />
-        </React.Suspense>
+        <HandsontableWorkbook
+          data={data}
+          readOnly={excelReadOnly}
+          readOnlyHotHeight={readOnlyHotHeight}
+          onChange={handleWorkbookChange}
+        />
       </div>
-      {templateExceedsPreview && (
-        <p className="text-xs text-amber-800 border border-amber-200 rounded bg-amber-50 px-2 py-1">
-          Form preview loads only the first {MAX_PREVIEW_ROWS} rows ×{" "}
-          {MAX_PREVIEW_COLS} columns of this workbook so the page stays
-          responsive.
-        </p>
-      )}
     </div>
   );
 });

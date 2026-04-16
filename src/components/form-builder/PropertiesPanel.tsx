@@ -18,8 +18,7 @@ import { FormField, FormSection, TableConfig, TableColumn } from "../../types";
 import { useToast } from "../ui/toast";
 import * as XLSX from "xlsx";
 import type { HandsontableWorkbookRef } from "./workbook/workbookTypes";
-
-const HandsontableWorkbook = React.lazy(() => import("./HandsontableWorkbook"));
+import HandsontableWorkbook from "./HandsontableWorkbook";
 
 interface PropertiesPanelProps {
   selectedItem: {

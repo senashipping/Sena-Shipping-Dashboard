@@ -125,11 +125,7 @@ const HandsontableWorkbook = React.forwardRef<
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
     if (!readOnly) return cloneEditableGrid(base);
-    const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
-    const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
-    return base
-      .slice(0, rows)
-      .map((row) => (Array.isArray(row) ? row.slice(0, cols) : []));
+    return cloneEditableGrid(base);
   });
 
   const [renaming, setRenaming] = React.useState(false);
@@ -182,9 +178,16 @@ const HandsontableWorkbook = React.forwardRef<
   >(new Map());
   const suppressNextHotReloadRef = React.useRef(false);
   const pendingIncomingReloadRef = React.useRef(false);
+  const pendingIncomingReloadSheetIndexRef = React.useRef<number | null>(null);
+  const pendingIncomingReloadWorkbookKeyRef = React.useRef<string | null>(null);
+  const lastLoadedSheetIndexRef = React.useRef<number | null>(null);
+  const lastLoadedWorkbookKeyRef = React.useRef<string | null>(null);
   const isEditingRef = React.useRef(false);
   const pendingReadOnlyEmitRef = React.useRef(false);
   const readOnlyEmitDebounceTimerRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const previewEditingSettleTimerRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
@@ -203,6 +206,10 @@ const HandsontableWorkbook = React.forwardRef<
     () => normalizeSheets(data),
     [data],
   );
+  const incomingWorkbookKey = React.useMemo(
+    () => workbookSignature(normalizedIncomingSheets),
+    [normalizedIncomingSheets],
+  );
 
   const safeSheets = workbookRef.current.sheets;
   const activeSheet =
@@ -212,23 +219,15 @@ const HandsontableWorkbook = React.forwardRef<
     Array.isArray(activeSheet?.grid) && activeSheet.grid.length > 0
       ? activeSheet.grid
       : EMPTY_GRID_PLACEHOLDER;
-  const previewRows = readOnly
-    ? Math.min(MAX_PREVIEW_ROWS, safeGrid.length)
-    : safeGrid.length;
-  const previewCols = readOnly
-    ? Math.min(MAX_PREVIEW_COLS, safeGrid[0]?.length || 0)
-    : safeGrid[0]?.length || 0;
+  const previewRows = safeGrid.length;
+  const previewCols = safeGrid[0]?.length || 0;
   /** Slices + merge filter must be memoized: new array refs every render forced HotTable to updateSettings in a tight loop (preview / dialog freeze). */
   const renderedGrid = React.useMemo(() => {
     if (!readOnly) return safeGrid;
-    return safeGrid
-      .slice(0, previewRows)
-      .map((row) => (Array.isArray(row) ? row.slice(0, previewCols) : []));
+    return safeGrid;
   }, [readOnly, safeGrid, previewRows, previewCols]);
 
-  const isPreviewTruncated =
-    readOnly &&
-    (safeGrid.length > previewRows || (safeGrid[0]?.length || 0) > previewCols);
+  const isPreviewTruncated = false;
 
   const renderedMergeCells = React.useMemo(
     () =>
@@ -734,11 +733,7 @@ const HandsontableWorkbook = React.forwardRef<
     (sheet?: SheetData) => {
       const base = sheet?.grid?.length ? sheet.grid : [[""]];
       if (!readOnly) return cloneEditableGrid(base);
-      const rows = Math.min(MAX_PREVIEW_ROWS, base.length);
-      const cols = Math.min(MAX_PREVIEW_COLS, base[0]?.length || 0);
-      return base
-        .slice(0, rows)
-        .map((row) => (Array.isArray(row) ? row.slice(0, cols) : []));
+      return cloneEditableGrid(base);
     },
     [readOnly],
   );
@@ -815,6 +810,11 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+      lastLoadedSheetIndexRef.current = targetIndex;
+      lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
+      pendingIncomingReloadRef.current = false;
+      pendingIncomingReloadSheetIndexRef.current = null;
+      pendingIncomingReloadWorkbookKeyRef.current = null;
       normalizeLegacyCheckboxValues(sheet);
 
       // Save the HOT grid's pixel scroll position before loadData resets it.
@@ -947,7 +947,7 @@ const HandsontableWorkbook = React.forwardRef<
       }
       preserveScrollOnNextLoadRef.current = true;
     },
-    [readOnly, toVisibleGrid, normalizeLegacyCheckboxValues],
+    [incomingWorkbookKey, readOnly, toVisibleGrid, normalizeLegacyCheckboxValues],
   );
 
   const handleSheetSwitch = (targetIndex: number) => {
@@ -1067,6 +1067,9 @@ const HandsontableWorkbook = React.forwardRef<
     () => () => {
       flushPendingColorTimers();
       flushReadOnlyEmitDebounce();
+      if (previewEditingSettleTimerRef.current) {
+        clearTimeout(previewEditingSettleTimerRef.current);
+      }
       if (undoRedoRefreshTimerRef.current) {
         clearTimeout(undoRedoRefreshTimerRef.current);
       }
@@ -1542,13 +1545,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (!readOnly) {
         setInitialGrid(cloneEditableGrid(first));
       } else {
-        const rows = Math.min(MAX_PREVIEW_ROWS, first.length);
-        const cols = Math.min(MAX_PREVIEW_COLS, first[0]?.length || 0);
-        setInitialGrid(
-          first
-            .slice(0, rows)
-            .map((row) => (Array.isArray(row) ? row.slice(0, cols) : [])),
-        );
+        setInitialGrid(cloneEditableGrid(first));
       }
     } else {
       setActiveSheetIndex((prev) =>
@@ -1558,11 +1555,6 @@ const HandsontableWorkbook = React.forwardRef<
       // preserved tab; avoid forcing sheet 0's grid into state here.
     }
   }, [normalizedIncomingSheets, readOnly]);
-
-  const incomingWorkbookKey = React.useMemo(
-    () => workbookSignature(normalizedIncomingSheets),
-    [normalizedIncomingSheets],
-  );
 
   const hotTableMountKey = React.useMemo(
     () => hotTableMountSignature(normalizedIncomingSheets),
@@ -1574,11 +1566,17 @@ const HandsontableWorkbook = React.forwardRef<
       suppressNextHotReloadRef.current = false;
       return;
     }
+    const needsReload =
+      activeSheetIndex !== lastLoadedSheetIndexRef.current ||
+      incomingWorkbookKey !== lastLoadedWorkbookKeyRef.current;
+    if (!needsReload) return;
     const hot = hotRef.current?.hotInstance;
     const isEditorOpen =
       typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
     if (readOnly && (isEditorOpen || isEditingRef.current)) {
       pendingIncomingReloadRef.current = true;
+      pendingIncomingReloadSheetIndexRef.current = activeSheetIndex;
+      pendingIncomingReloadWorkbookKeyRef.current = incomingWorkbookKey;
       return;
     }
     loadSheetIntoHot(activeSheetIndex);
@@ -1905,21 +1903,51 @@ const HandsontableWorkbook = React.forwardRef<
       scheduleReadOnlyEmit();
     }
     if (pendingIncomingReloadRef.current) {
+      const pendingSheetIndex =
+        pendingIncomingReloadSheetIndexRef.current ?? activeSheetIndexRef.current;
+      const pendingWorkbookKey =
+        pendingIncomingReloadWorkbookKeyRef.current ?? incomingWorkbookKey;
       pendingIncomingReloadRef.current = false;
-      loadSheetIntoHot(activeSheetIndexRef.current);
+      pendingIncomingReloadSheetIndexRef.current = null;
+      pendingIncomingReloadWorkbookKeyRef.current = null;
+      const stillNeedsReload =
+        pendingSheetIndex !== lastLoadedSheetIndexRef.current ||
+        pendingWorkbookKey !== lastLoadedWorkbookKeyRef.current;
+      if (stillNeedsReload) {
+        loadSheetIntoHot(pendingSheetIndex);
+      }
     }
-  }, [loadSheetIntoHot, scheduleReadOnlyEmit]);
+  }, [incomingWorkbookKey, loadSheetIntoHot, scheduleReadOnlyEmit]);
+
+  const schedulePreviewEditingSettle = React.useCallback(() => {
+    if (!readOnly) return;
+    if (previewEditingSettleTimerRef.current) {
+      clearTimeout(previewEditingSettleTimerRef.current);
+    }
+    previewEditingSettleTimerRef.current = setTimeout(() => {
+      previewEditingSettleTimerRef.current = null;
+      const hot = hotRef.current?.hotInstance;
+      const editorOpen =
+        typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
+      if (editorOpen) return;
+      isEditingRef.current = false;
+      flushPendingPreviewSyncs();
+    }, 160);
+  }, [flushPendingPreviewSyncs, readOnly]);
 
   const beforeBeginEditing = React.useCallback(() => {
     if (!readOnly) return;
+    if (previewEditingSettleTimerRef.current) {
+      clearTimeout(previewEditingSettleTimerRef.current);
+      previewEditingSettleTimerRef.current = null;
+    }
     isEditingRef.current = true;
   }, [readOnly]);
 
   const afterDeselect = React.useCallback(() => {
     if (!readOnly) return;
-    isEditingRef.current = false;
-    flushPendingPreviewSyncs();
-  }, [readOnly, flushPendingPreviewSyncs]);
+    schedulePreviewEditingSettle();
+  }, [readOnly, schedulePreviewEditingSettle]);
 
   const afterChangeWithEditTracking = React.useCallback(
     (changes: any, source: string) => {
@@ -1928,17 +1956,9 @@ const HandsontableWorkbook = React.forwardRef<
       if (source === "afterAutofill" || source === "Autofill.fill") {
         isEditingRef.current = false;
       }
-      setTimeout(() => {
-        const hot = hotRef.current?.hotInstance;
-        const editorOpen =
-          typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
-        if (!editorOpen) {
-          isEditingRef.current = false;
-          flushPendingPreviewSyncs();
-        }
-      }, 0);
+      schedulePreviewEditingSettle();
     },
-    [afterChange, flushPendingPreviewSyncs, readOnly],
+    [afterChange, readOnly, schedulePreviewEditingSettle],
   );
 
   const afterSelection = React.useCallback(
@@ -2163,7 +2183,7 @@ const HandsontableWorkbook = React.forwardRef<
       autoWrapCol: true,
       cells: cellsCallback,
       afterGetCellMeta,
-      beforeChange: disableEditorCompletely ? (() => false) : undefined,
+      beforeChange: disableEditorCompletely ? () => false : undefined,
       afterColumnResize,
       afterRowResize,
       afterChange: disableEditorCompletely
@@ -2757,7 +2777,10 @@ const HandsontableWorkbook = React.forwardRef<
       <div
         ref={hotViewportRef}
         className="hot-wrapper relative z-0 overflow-hidden border rounded-md ht-theme-main"
-        style={{ width: "100%", height: readOnly ? (readOnlyHotHeight ?? 380) : 320 }}
+        style={{
+          width: "100%",
+          height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
+        }}
       >
         <div style={hotTableScaleStyle}>
           <HotTable
