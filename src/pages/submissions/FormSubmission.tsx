@@ -5,7 +5,9 @@ import api from "../../api";
 import { Button } from "../../components/ui/button";
 import { Alert, AlertDescription } from "../../components/ui/alert";
 import { ArrowLeft, FileText } from "lucide-react";
-import SharedFormRenderer from "../../components/form-builder/SharedFormRenderer";
+import SharedFormRenderer, {
+  SharedFormRendererRef,
+} from "../../components/form-builder/SharedFormRenderer";
 
 const FormSubmission: React.FC = () => {
   const { id: formId } = useParams<{ id: string }>();
@@ -18,6 +20,7 @@ const FormSubmission: React.FC = () => {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
   const latestResolvedFormDataRef = React.useRef<Record<string, any>>({});
+  const formRendererRef = React.useRef<SharedFormRendererRef | null>(null);
 
   const { data: form, isLoading: formLoading } = useQuery({
     queryKey: ["form", formId],
@@ -146,9 +149,13 @@ const FormSubmission: React.FC = () => {
     if (form?.data?.data?.formType === "table") {
       submissionFormData = { tableData };
     } else if (form?.data?.data?.formType === "mixed") {
-      submissionFormData = latestResolvedFormDataRef.current;
+      submissionFormData =
+        formRendererRef.current?.getResolvedFormData() ??
+        latestResolvedFormDataRef.current;
     } else {
-      submissionFormData = latestResolvedFormDataRef.current;
+      submissionFormData =
+        formRendererRef.current?.getResolvedFormData() ??
+        latestResolvedFormDataRef.current;
     }
 
     const submissionData = {
@@ -215,6 +222,7 @@ const FormSubmission: React.FC = () => {
       {form?.data?.data && (
         <form onSubmit={handleSubmit}>
           <SharedFormRenderer
+            ref={formRendererRef}
             formState={form.data.data}
             formData={formData}
             tableData={tableData}

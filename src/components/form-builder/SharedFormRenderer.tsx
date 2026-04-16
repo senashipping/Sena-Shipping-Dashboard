@@ -20,7 +20,9 @@ import {
   EXCEL_PREVIEW_SHEET_FRAME_CLASS,
   getExcelPreviewHotHeightPx,
 } from "./excelSheetPreviewLayout";
-import HandsontableWorkbook from "./HandsontableWorkbook";
+import HandsontableWorkbook, {
+  HandsontableWorkbookRef,
+} from "./HandsontableWorkbook";
 
 /**
  * Read-only preview renders a truncated workbook for performance. When HOT emits
@@ -78,6 +80,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   useLocalExcelState: boolean;
   setLocalExcelState: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   onFieldChange: (fieldName: string, value: any) => void;
+  workbookComponentRef?: React.RefObject<HandsontableWorkbookRef | null>;
 }> = React.memo(function EmbeddedExcelHandsontableBlock({
   fieldName,
   workbook,
@@ -85,6 +88,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   useLocalExcelState,
   setLocalExcelState,
   onFieldChange,
+  workbookComponentRef,
 }) {
   const data = workbook;
 
@@ -126,6 +130,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
     <div className="space-y-2">
       <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
         <HandsontableWorkbook
+          ref={workbookComponentRef}
           data={data}
           readOnly={excelReadOnly}
           readOnlyHotHeight={readOnlyHotHeight}
@@ -165,7 +170,14 @@ interface SharedFormRendererProps {
   onResolvedFormDataChange?: (data: Record<string, any>) => void;
 }
 
-const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
+export type SharedFormRendererRef = {
+  getResolvedFormData: () => Record<string, any>;
+};
+
+const SharedFormRenderer = React.forwardRef<
+  SharedFormRendererRef,
+  SharedFormRendererProps
+>(function SharedFormRenderer({
   formState,
   formData,
   tableData,
@@ -180,7 +192,7 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
   useLocalExcelState = false,
   excelReadOnly = false,
   onResolvedFormDataChange,
-}) => {
+}, ref) {
   const [signatureErrors, setSignatureErrors] = React.useState<
     Record<string, string>
   >({});
@@ -190,6 +202,17 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
   const [localExcelState, setLocalExcelState] = React.useState<
     Record<string, any>
   >({});
+  const workbookRefs = React.useRef<
+    Record<string, React.RefObject<HandsontableWorkbookRef | null>>
+  >({});
+
+  const getWorkbookRef = React.useCallback((fieldName: string) => {
+    if (!workbookRefs.current[fieldName]) {
+      workbookRefs.current[fieldName] =
+        React.createRef<HandsontableWorkbookRef | null>();
+    }
+    return workbookRefs.current[fieldName];
+  }, []);
 
   const resolvedFormData = React.useMemo(
     () => ({
@@ -202,6 +225,42 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
   React.useEffect(() => {
     onResolvedFormDataChange?.(resolvedFormData);
   }, [onResolvedFormDataChange, resolvedFormData]);
+
+  const getResolvedFormData = React.useCallback(() => {
+    const nextData = {
+      ...formData,
+      ...localExcelState,
+    };
+
+    const syncWorkbookSnapshot = (field: FormField) => {
+      if (field.type !== "embedded_excel") return;
+      const workbookSnapshot = workbookRefs.current[
+        field.name
+      ]?.current?.getWorkbookSnapshot();
+      if (workbookSnapshot?.sheets?.length) {
+        nextData[field.name] = workbookSnapshot;
+      }
+    };
+
+    for (const field of formState.fields || []) {
+      syncWorkbookSnapshot(field);
+    }
+    for (const section of formState.sections || []) {
+      for (const field of section.fields || []) {
+        syncWorkbookSnapshot(field);
+      }
+    }
+
+    return nextData;
+  }, [formData, formState.fields, formState.sections, localExcelState]);
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      getResolvedFormData,
+    }),
+    [getResolvedFormData],
+  );
 
   const getFilePreview = (
     rawValue: unknown,
@@ -503,6 +562,7 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
             useLocalExcelState={useLocalExcelState}
             setLocalExcelState={setLocalExcelState}
             onFieldChange={onFieldChange}
+            workbookComponentRef={getWorkbookRef(field.name)}
           />
         );
       }
@@ -963,6 +1023,6 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
       </Card>
     </div>
   );
-};
+});
 
 export default SharedFormRenderer;
