@@ -1235,11 +1235,12 @@ const HandsontableWorkbook = React.forwardRef<
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        // Only restore scroll on local scroll containers. When falling back to
+        // the document element, allow the browser's natural scroll position so
+        // we do not unexpectedly jump the page back to the top.
         if (container && container !== document.documentElement) {
           container.scrollTop = savedScrollTop;
           container.scrollLeft = savedScrollLeft;
-        } else {
-          window.scrollTo(savedScrollLeft, savedScrollTop);
         }
       });
     });
@@ -2054,11 +2055,13 @@ const HandsontableWorkbook = React.forwardRef<
         setFormulaInput(v == null ? "" : String(v));
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
+            // Only restore scroll for the dialog / local scroll container.
+            // When the fallback is the document element, avoid forcing the
+            // window scroll position, which caused the page to jump back to
+            // the top whenever the selection changed.
             if (container && container !== document.documentElement) {
               (container as HTMLElement).scrollTop = savedTop;
               (container as HTMLElement).scrollLeft = savedLeft;
-            } else {
-              window.scrollTo(savedLeft, savedTop);
             }
           });
         });
