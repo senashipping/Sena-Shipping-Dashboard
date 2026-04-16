@@ -816,7 +816,7 @@ const HandsontableWorkbook = React.forwardRef<
       // restoration. We capture the position here and restore it via double-rAF
       // so it lands after both loadData calls have settled.
       const masterHolder = hot.rootElement?.querySelector?.(
-        ".wtHolder",
+        ".ht_master .wtHolder, .wtHolder",
       ) as HTMLElement | null;
       const savedScrollTop = masterHolder?.scrollTop ?? 0;
       const savedScrollLeft = masterHolder?.scrollLeft ?? 0;
@@ -928,7 +928,7 @@ const HandsontableWorkbook = React.forwardRef<
           requestAnimationFrame(() => {
             const h = hotRef.current?.hotInstance;
             const holder = h?.rootElement?.querySelector?.(
-              ".wtHolder",
+              ".ht_master .wtHolder, .wtHolder",
             ) as HTMLElement | null;
             if (holder) {
               holder.scrollTop = savedScrollTop;
