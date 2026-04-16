@@ -80,7 +80,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   useLocalExcelState: boolean;
   setLocalExcelState: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   onFieldChange: (fieldName: string, value: any) => void;
-  workbookComponentRef?: React.RefObject<HandsontableWorkbookRef | null>;
+  workbookComponentRef?: React.Ref<HandsontableWorkbookRef>;
 }> = React.memo(function EmbeddedExcelHandsontableBlock({
   fieldName,
   workbook,
@@ -202,14 +202,11 @@ const SharedFormRenderer = React.forwardRef<
   const [localExcelState, setLocalExcelState] = React.useState<
     Record<string, any>
   >({});
-  const workbookRefs = React.useRef<
-    Record<string, React.RefObject<HandsontableWorkbookRef | null>>
-  >({});
+  const workbookRefs = React.useRef<Record<string, React.RefObject<HandsontableWorkbookRef>>>({});
 
   const getWorkbookRef = React.useCallback((fieldName: string) => {
     if (!workbookRefs.current[fieldName]) {
-      workbookRefs.current[fieldName] =
-        React.createRef<HandsontableWorkbookRef | null>();
+      workbookRefs.current[fieldName] = React.createRef<HandsontableWorkbookRef>();
     }
     return workbookRefs.current[fieldName];
   }, []);
