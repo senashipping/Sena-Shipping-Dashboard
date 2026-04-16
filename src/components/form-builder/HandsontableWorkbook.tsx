@@ -2128,7 +2128,8 @@ const HandsontableWorkbook = React.forwardRef<
       trimWhitespace: false,
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
       height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
-      renderAllRows: false,
+      // In preview (readOnly), fully materialize all rows instead of viewport virtualization.
+      renderAllRows: readOnly,
       viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
       formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
