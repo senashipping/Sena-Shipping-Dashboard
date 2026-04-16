@@ -191,6 +191,12 @@ const HandsontableWorkbook = React.forwardRef<
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const preserveScrollOnNextLoadRef = React.useRef(true);
+  // The dialog element (if any) that wraps this component. Handsontable menus
+  // must render inside it so Radix's `inert`/pointer-events restriction doesn't
+  // block clicks on menu items that would otherwise land in document.body.
+  const [menuContainer, setMenuContainer] = React.useState<HTMLElement | null>(
+    null,
+  );
   const disableEditorCompletely = readOnly && strictViewOnly;
 
   const normalizedIncomingSheets = React.useMemo(
@@ -268,7 +274,40 @@ const HandsontableWorkbook = React.forwardRef<
     return () => ro.disconnect();
   }, []);
 
+  React.useEffect(() => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
+    if (Array.isArray(renderedColWidths) && renderedColWidths.length > 0) {
+      hot.updateSettings({ colWidths: renderedColWidths }, false);
+    }
+  }, [renderedColWidths]);
+
+  React.useEffect(() => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
+    if (Array.isArray(renderedRowHeights) && renderedRowHeights.length > 0) {
+      hot.updateSettings({ rowHeights: renderedRowHeights }, false);
+    }
+  }, [renderedRowHeights]);
+
+  // Detect the Radix dialog ancestor once after mount and store it in state so
+  // it flows into hotTableSettings. Handsontable appends menus to a portal div
+  // in document.body by default; when the component lives inside a Radix Dialog,
+  // the dialog's `inert` attribute makes that portal non-interactive. Passing
+  // `uiContainer` through settings (not by mutating the plugin instance) is the
+  // only reliable way — the plugins read it inside enablePlugin() when creating
+  // their Menu DOM.
+  React.useLayoutEffect(() => {
+    const dialog = hotViewportRef.current?.closest(
+      '[role="dialog"]',
+    ) as HTMLElement | null;
+    if (dialog) setMenuContainer(dialog);
+  }, []);
+
   const hotTableZoom = React.useMemo(() => {
+    // Keep edit mode unscaled so Handsontable menu/click coordinates
+    // (context menu and dropdown menu) stay aligned with pointer targets.
+    if (!readOnly) return 1;
     if (hotViewportWidth <= 0) return 1;
     const colCount = renderedGrid.reduce(
       (max, row) => Math.max(max, Array.isArray(row) ? row.length : 0),
@@ -293,7 +332,7 @@ const HandsontableWorkbook = React.forwardRef<
     const targetScale =
       hotViewportWidth / Math.max(1, targetVisibleCols * estimatedAvgWidth);
     return Math.max(0.5, Math.min(1, targetScale));
-  }, [hotViewportWidth, renderedGrid, renderedColWidths]);
+  }, [readOnly, hotViewportWidth, renderedGrid, renderedColWidths]);
 
   const hotTableScaleStyle = React.useMemo<React.CSSProperties>(() => {
     if (hotTableZoom >= 0.999) return {};
@@ -1709,6 +1748,34 @@ const HandsontableWorkbook = React.forwardRef<
             s.verticalAlign = vAlignToken.replace("meta-valign-", "");
           if (tokens.includes("meta-wrap")) s.whiteSpace = "normal";
 
+          // Runtime fallback for selection visibility:
+          // if theme/reset CSS hides HOT's default selection layer, explicitly tint
+          // every cell inside the currently selected rectangle.
+          const selectedRange = instance?.getSelectedRangeLast?.();
+          const from = selectedRange?.from;
+          const to = selectedRange?.to;
+          if (
+            from &&
+            to &&
+            Number.isInteger(from.row) &&
+            Number.isInteger(from.col) &&
+            Number.isInteger(to.row) &&
+            Number.isInteger(to.col)
+          ) {
+            const minRow = Math.min(from.row, to.row);
+            const maxRow = Math.max(from.row, to.row);
+            const minCol = Math.min(from.col, to.col);
+            const maxCol = Math.max(from.col, to.col);
+            const inSelection =
+              rowIndex >= minRow &&
+              rowIndex <= maxRow &&
+              colIndex >= minCol &&
+              colIndex <= maxCol;
+            if (inSelection) {
+              s.backgroundColor = "rgba(26, 115, 232, 0.14)";
+            }
+          }
+
           if (image?.dataUrl) {
             const colWidths = Array.isArray(renderedColWidths)
               ? renderedColWidths
@@ -1967,6 +2034,7 @@ const HandsontableWorkbook = React.forwardRef<
   const hotTableContextMenu = React.useMemo<any>(() => {
     if (readOnly) return false;
     return {
+      ...(menuContainer ? { uiContainer: menuContainer } : {}),
       items: {
         row_above: {},
         row_below: {},
@@ -1975,6 +2043,7 @@ const HandsontableWorkbook = React.forwardRef<
         hsep1: "---------",
         remove_row: {},
         remove_col: {},
+        clear_column: {},
         hidden_rows_hide: {},
         hidden_rows_show: {},
         hidden_columns_hide: {},
@@ -1982,6 +2051,7 @@ const HandsontableWorkbook = React.forwardRef<
         hsep2: "---------",
         mergeCells: {},
         hsep3: "---------",
+        read_only: {},
         alignment: {},
         row_height: {},
         col_width: {},
@@ -1995,15 +2065,15 @@ const HandsontableWorkbook = React.forwardRef<
         redo: {},
       },
     };
-  }, [readOnly]);
+  }, [readOnly, menuContainer]);
 
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
   const hotTableSettings = React.useMemo(
     () => ({
       data: initialGrid,
-      themeName: "ht-theme-main" as const,
       rowHeaders: true,
       colHeaders: true,
+      selectionMode: "multiple" as const,
       licenseKey: "non-commercial-and-evaluation" as const,
       readOnly: disableEditorCompletely ? true : false,
       disableVisualSelection: disableEditorCompletely ? false : undefined,
@@ -2014,7 +2084,6 @@ const HandsontableWorkbook = React.forwardRef<
           }
         : undefined,
       trimWhitespace: false,
-      width: hotViewportWidth > 0 ? hotViewportWidth : "100%",
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
       height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
       renderAllRows: false,
@@ -2024,8 +2093,15 @@ const HandsontableWorkbook = React.forwardRef<
       mergeCells:
         renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
       filters: heavyPluginsEnabled,
-      dropdownMenu: heavyPluginsEnabled,
+      // When inside a Radix dialog, pass an object so uiContainer is included;
+      // otherwise keep `true` to enable the default dropdown-menu items.
+      dropdownMenu: heavyPluginsEnabled
+        ? menuContainer
+          ? { uiContainer: menuContainer }
+          : true
+        : false,
       columnSorting: !readOnly,
+      manualColumnMove: !readOnly,
       hiddenRows: !readOnly ? ({ indicators: true } as const) : undefined,
       hiddenColumns: !readOnly ? ({ indicators: true } as const) : undefined,
       multiColumnSorting: !readOnly,
@@ -2036,11 +2112,52 @@ const HandsontableWorkbook = React.forwardRef<
       fixedRowsTop: 0,
       fixedColumnsStart: 0,
       contextMenu: hotTableContextMenu,
-      className: "ht-theme-main",
-      manualRowResize: !readOnly && !lightweightPerformance,
-      manualColumnResize: !readOnly && !lightweightPerformance,
-      colWidths: renderedColWidths as any,
-      rowHeights: renderedRowHeights as any,
+      // ── Dialog-aware menu positioning ────────────────────────────────────────
+      // Handsontable's positioner sets container.style.top = pageY + 1 (absolute
+      // document coordinates). When the menu is position:absolute inside a Radix
+      // DialogContent that has a CSS transform, the transform creates a new
+      // containing block, so pageY-based coords land in the wrong place.
+      //
+      // afterContextMenuShow fires after menu.open() but BEFORE menu.setPosition()
+      // in contextMenu.open(). We patch setPosition once per Menu instance so
+      // that after HOT applies its page-absolute coords we subtract the dialog's
+      // current viewport offset (and window scroll), converting to dialog-relative.
+      afterContextMenuShow: menuContainer
+        ? (contextMenuPlugin: any) => {
+            const menu = contextMenuPlugin?.menu;
+            if (!menu || (menu as any).__htDialogPositionPatched) return;
+            (menu as any).__htDialogPositionPatched = true;
+            const mc = menuContainer; // non-null: guarded by outer ternary
+            const orig = (menu.setPosition as (c: any) => void).bind(menu);
+            menu.setPosition = (coords: any) => {
+              orig(coords);
+              const dr = mc.getBoundingClientRect();
+              // HOT: style.top = pageY + 1 = clientY + scrollY + 1
+              // Want: clientY + 1 - dialogRect.top (dialog-relative)
+              const t = parseFloat(menu.container.style.top) || 0;
+              const l = parseFloat(menu.container.style.left) || 0;
+              menu.container.style.top = `${t - window.scrollY - dr.top}px`;
+              menu.container.style.left = `${l - window.scrollX - dr.left}px`;
+            };
+          }
+        : undefined,
+      afterDropdownMenuShow: menuContainer
+        ? (dropdownMenuPlugin: any) => {
+            const menu = dropdownMenuPlugin?.menu;
+            if (!menu || (menu as any).__htDialogPositionPatched) return;
+            (menu as any).__htDialogPositionPatched = true;
+            const mc = menuContainer;
+            const orig = (menu.setPosition as (c: any) => void).bind(menu);
+            menu.setPosition = (coords: any) => {
+              orig(coords);
+              const dr = mc.getBoundingClientRect();
+              const t = parseFloat(menu.container.style.top) || 0;
+              const l = parseFloat(menu.container.style.left) || 0;
+              menu.container.style.top = `${t - window.scrollY - dr.top}px`;
+              menu.container.style.left = `${l - window.scrollX - dr.left}px`;
+            };
+          }
+        : undefined,
       wordWrap: true,
       autoWrapRow: true,
       autoWrapCol: true,
@@ -2067,7 +2184,6 @@ const HandsontableWorkbook = React.forwardRef<
     }),
     [
       initialGrid,
-      hotViewportWidth,
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
@@ -2075,13 +2191,11 @@ const HandsontableWorkbook = React.forwardRef<
       renderedMergeCells,
       heavyPluginsEnabled,
       hotTableContextMenu,
+      menuContainer,
       lightweightPerformance,
       disableEditorCompletely,
-      renderedColWidths,
-      renderedRowHeights,
       cellsCallback,
       afterGetCellMeta,
-      disableEditorCompletely,
       afterColumnResize,
       afterRowResize,
       afterChangeWithEditTracking,
@@ -2126,6 +2240,46 @@ const HandsontableWorkbook = React.forwardRef<
         .meta-valign-middle { vertical-align: middle !important; }
         .meta-valign-bottom { vertical-align: bottom !important; }
         .meta-fillable { background-color: #fffbe6 !important; }
+        /* ── Handsontable 16 selection colours ──────────────────────────────────
+           In HOT 16 / ht-theme-main the selection highlight uses two mechanisms:
+             1. td.area::before  – a position:absolute inset-0 pseudo-element whose
+                background is var(--ht-cell-selection-background-color) at opacity 0.14.
+                Setting background-color on the td itself is hidden behind this overlay.
+             2. .wtBorder divs   – absolutely-positioned 1–2 px divs whose visible
+                colour comes from background-color, NOT from the CSS border-* props.
+                Adding border-color / border-width here has no visual effect.
+                Adding opacity here (was 0.3) makes the selection border nearly invisible.
+           The correct customisation path is to override the CSS custom properties
+           that both mechanisms already read from. */
+        .ht-theme-main {
+          --ht-cell-selection-background-color: #1a73e8;
+          --ht-cell-selection-border-color: #1a73e8;
+        }
+        /* Subtle tint on the single active cell (complements the wtBorder box). */
+        .handsontable tr td.current { background-color: rgba(26, 115, 232, 0.05) !important; }
+        .hot-wrapper {
+          width: 100%;
+        }
+        /* Force selection visibility regardless of theme/reset collisions. */
+        .hot-wrapper .handsontable td.current,
+        .hot-wrapper .handsontable td.area,
+        .hot-wrapper .handsontable td[class*="area-"] {
+          background-color: rgba(26, 115, 232, 0.14) !important;
+        }
+        .hot-wrapper .handsontable td.area::before,
+        .hot-wrapper .handsontable td[class*="area-"]::before {
+          background-color: rgba(26, 115, 232, 0.18) !important;
+          opacity: 1 !important;
+        }
+        .hot-wrapper .handsontable .ht__highlight,
+        .hot-wrapper .handsontable .ht__active_highlight {
+          background-color: rgba(26, 115, 232, 0.14) !important;
+        }
+        .hot-wrapper .handsontable .wtBorder,
+        .hot-wrapper .handsontable .wtBorder div {
+          background-color: #1a73e8 !important;
+          opacity: 1 !important;
+        }
       `}</style>
 
       {/* ── Toolbar ── */}
@@ -2602,7 +2756,8 @@ const HandsontableWorkbook = React.forwardRef<
       {/* ── Grid ── */}
       <div
         ref={hotViewportRef}
-        className="relative z-0 overflow-hidden border rounded-md"
+        className="hot-wrapper relative z-0 overflow-hidden border rounded-md ht-theme-main"
+        style={{ width: "100%", height: readOnly ? (readOnlyHotHeight ?? 380) : 320 }}
       >
         <div style={hotTableScaleStyle}>
           <HotTable
@@ -2612,6 +2767,9 @@ const HandsontableWorkbook = React.forwardRef<
             key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
             ref={hotRef}
             {...hotTableSettings}
+            manualColumnResize={!readOnly && !lightweightPerformance}
+            manualRowResize={!readOnly && !lightweightPerformance}
+            width={hotViewportWidth > 0 ? hotViewportWidth : "100%"}
           />
         </div>
       </div>

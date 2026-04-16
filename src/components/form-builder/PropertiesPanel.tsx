@@ -683,7 +683,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       )}
       {field.type === "embedded_excel" && (
         <Dialog open={isWorkbookEditorOpen} onOpenChange={(open) => setIsWorkbookEditorOpen(open)}>
-          <DialogContent className="max-w-[min(96vw,1200px)] max-h-[90vh] overflow-hidden">
+          <DialogContent className="max-w-[min(96vw,1200px)] max-h-[90vh] overflow-visible">
             <DialogHeader>
               <DialogTitle>Edit Workbook</DialogTitle>
               <DialogDescription>
@@ -701,7 +701,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     data={workbookDraft}
                     onChange={(next) => setWorkbookDraft(next)}
                     readOnly={false}
-                    lightweightPerformance
                   />
                 </React.Suspense>
               ) : (
