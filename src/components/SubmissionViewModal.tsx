@@ -16,8 +16,8 @@ import { cn, formatDate } from "../lib/utils";
 import {
   EXCEL_PREVIEW_DIALOG_CONTENT_CLASS,
   EXCEL_PREVIEW_SHEET_FRAME_CLASS,
-  EXCEL_RUNTIME_MATCH_EDITOR_FRAME_CLASS,
   formDefinitionHasEmbeddedExcel,
+  getExcelPreviewHotHeightPx,
 } from "./form-builder/excelSheetPreviewLayout";
 import HandsontableWorkbook from "./form-builder/HandsontableWorkbook";
 import { FileText, User, Ship, Calendar, Clock, CheckCircle, XCircle, AlertCircle, FileDown } from "lucide-react";
@@ -128,6 +128,7 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
       };
   }
 
+  const excelPreviewHotHeight = getExcelPreviewHotHeightPx();
   const hasEmbeddedExcelForm = formDefinitionHasEmbeddedExcel(
     submission.form?.fields,
     submission.form?.sections,
@@ -188,15 +189,13 @@ const SubmissionViewModal: React.FC<SubmissionViewModalProps> = ({
               ? data[field.name]
               : field.excelTemplate;
           value = workbookData?.sheets?.length ? (
-            <div
-              className={`${EXCEL_PREVIEW_SHEET_FRAME_CLASS} ${EXCEL_RUNTIME_MATCH_EDITOR_FRAME_CLASS}`}
-            >
+            <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
               <HandsontableWorkbook
                 data={workbookData}
                 onChange={() => {}}
                 readOnly
                 strictViewOnly={strictWorkbookViewOnly}
-                embeddedExcelMatchEditorViewport
+                readOnlyHotHeight={excelPreviewHotHeight}
               />
             </div>
           ) : (

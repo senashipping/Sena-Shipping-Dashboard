@@ -18,7 +18,6 @@ import { FormField, FormSection, TableConfig } from "../../types";
 import { Alert, AlertDescription } from "../ui/alert";
 import {
   EXCEL_PREVIEW_SHEET_FRAME_CLASS,
-  EXCEL_RUNTIME_MATCH_EDITOR_FRAME_CLASS,
   getExcelPreviewHotHeightPx,
 } from "./excelSheetPreviewLayout";
 import HandsontableWorkbook, {
@@ -93,6 +92,11 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
 }) {
   const data = workbook;
 
+  const readOnlyHotHeight = React.useMemo(
+    () => (excelReadOnly ? getExcelPreviewHotHeightPx() : undefined),
+    [excelReadOnly],
+  );
+
   // Keep a ref to `workbook` so the memoized onChange below never goes stale
   // while also not needing `workbook` as a dep (which would recreate on every edit).
   const workbookRef = React.useRef(workbook);
@@ -124,18 +128,12 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
 
   return (
     <div className="space-y-2">
-      <div
-        className={
-          excelReadOnly
-            ? `${EXCEL_PREVIEW_SHEET_FRAME_CLASS} ${EXCEL_RUNTIME_MATCH_EDITOR_FRAME_CLASS}`
-            : EXCEL_PREVIEW_SHEET_FRAME_CLASS
-        }
-      >
+      <div className={EXCEL_PREVIEW_SHEET_FRAME_CLASS}>
         <HandsontableWorkbook
           ref={workbookComponentRef}
           data={data}
           readOnly={excelReadOnly}
-          embeddedExcelMatchEditorViewport={excelReadOnly}
+          readOnlyHotHeight={readOnlyHotHeight}
           onChange={handleWorkbookChange}
         />
       </div>

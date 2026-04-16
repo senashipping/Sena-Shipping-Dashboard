@@ -39,12 +39,6 @@ export interface HandsontableWorkbookProps {
   strictViewOnly?: boolean;
   readOnlyHotHeight?: number;
   lightweightPerformance?: boolean;
-  /**
-   * Use the same fixed HOT height (320px) and virtualization as the admin
-   * "Edit Workbook" dialog instead of a tall read-only viewport.
-   * Intended for form preview, submission page, and submission detail modal.
-   */
-  embeddedExcelMatchEditorViewport?: boolean;
 }
 
 export type HandsontableWorkbookRef = {
