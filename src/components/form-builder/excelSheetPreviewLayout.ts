@@ -26,6 +26,13 @@ export const EXCEL_PREVIEW_DIALOG_CONTENT_CLASS =
 /** Direct wrapper around read-only Handsontable — full width of host, horizontal scroll if needed. */
 export const EXCEL_PREVIEW_SHEET_FRAME_CLASS = "w-full min-w-0 overflow-x-auto";
 
+/**
+ * Same outer scroll shell as the admin Edit Workbook dialog (`PropertiesPanel`).
+ * Use with `embeddedExcelMatchEditorViewport` on `HandsontableWorkbook` (320px HOT height).
+ */
+export const EXCEL_RUNTIME_MATCH_EDITOR_FRAME_CLASS =
+  "max-h-[65vh] min-h-0 overflow-y-auto";
+
 export function formDefinitionHasEmbeddedExcel(
   fields: { type: string }[] | undefined,
   sections: { type?: string; fields?: { type: string }[] }[] | undefined,

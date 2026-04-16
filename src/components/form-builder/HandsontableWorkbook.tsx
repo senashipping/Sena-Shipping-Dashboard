@@ -94,6 +94,7 @@ const HandsontableWorkbook = React.forwardRef<
     strictViewOnly = false,
     readOnlyHotHeight,
     lightweightPerformance = false,
+    embeddedExcelMatchEditorViewport = false,
   },
   ref,
 ) {
@@ -314,6 +315,11 @@ const HandsontableWorkbook = React.forwardRef<
     ) as HTMLElement | null;
     if (dialog) setMenuContainer(dialog);
   }, []);
+
+  /** Same HOT viewport geometry as `readOnly={false}` editor (320px, default virtualization). */
+  const matchEditorHotViewport = Boolean(
+    embeddedExcelMatchEditorViewport && readOnly,
+  );
 
   const hotTableZoom = React.useMemo(() => 1, [
     readOnly,
@@ -2126,9 +2132,13 @@ const HandsontableWorkbook = React.forwardRef<
         : undefined,
       trimWhitespace: false,
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
-      height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
-      // In preview (readOnly), fully materialize all rows instead of viewport virtualization.
-      renderAllRows: readOnly,
+      height: matchEditorHotViewport
+        ? 320
+        : readOnly
+          ? (readOnlyHotHeight ?? 380)
+          : 320,
+      // Match the editor dialog: default virtualization. Tall read-only preview uses full row render.
+      renderAllRows: readOnly && !matchEditorHotViewport,
       viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
       formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
@@ -2228,6 +2238,7 @@ const HandsontableWorkbook = React.forwardRef<
       initialGrid,
       stretchColumnsInPreview,
       readOnly,
+      matchEditorHotViewport,
       readOnlyHotHeight,
       shouldUseFormulaEngine,
       renderedMergeCells,
@@ -2801,7 +2812,11 @@ const HandsontableWorkbook = React.forwardRef<
         className="hot-wrapper relative z-0 overflow-hidden border rounded-md ht-theme-main"
         style={{
           width: "100%",
-          height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
+          height: matchEditorHotViewport
+            ? 320
+            : readOnly
+              ? (readOnlyHotHeight ?? 380)
+              : 320,
         }}
       >
         {isHotLoading && (
