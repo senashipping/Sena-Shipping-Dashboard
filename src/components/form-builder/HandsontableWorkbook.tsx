@@ -191,6 +191,10 @@ const HandsontableWorkbook = React.forwardRef<
     typeof setTimeout
   > | null>(null);
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
+  const mergeCacheFrameRef = React.useRef<{
+    frameId: number;
+    mergedSet: Set<string>;
+  }>({ frameId: -1, mergedSet: new Set() });
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const preserveScrollOnNextLoadRef = React.useRef(true);
@@ -229,22 +233,30 @@ const HandsontableWorkbook = React.forwardRef<
 
   const isPreviewTruncated = false;
 
-  const renderedMergeCells = React.useMemo(
-    () =>
-      (activeSheet.mergeCells || []).filter(
-        (m) =>
-          m &&
-          Number.isFinite(+m.row) &&
-          Number.isFinite(+m.col) &&
-          Number.isFinite(+m.rowspan) &&
-          Number.isFinite(+m.colspan) &&
-          m.row < previewRows &&
-          m.col < previewCols &&
-          m.row + m.rowspan <= previewRows &&
-          m.col + m.colspan <= previewCols,
-      ),
-    [activeSheet.mergeCells, previewRows, previewCols],
-  );
+  const lastMergeSigRef = React.useRef<string>("");
+  const stableMergesRef = React.useRef<any[]>([]);
+
+  const renderedMergeCells = React.useMemo(() => {
+    const filtered = (activeSheet.mergeCells || []).filter(
+      (m) =>
+        m &&
+        Number.isFinite(+m.row) &&
+        Number.isFinite(+m.col) &&
+        Number.isFinite(+m.rowspan) &&
+        Number.isFinite(+m.colspan) &&
+        m.row < previewRows &&
+        m.col < previewCols &&
+        m.row + m.rowspan <= previewRows &&
+        m.col + m.colspan <= previewCols,
+    );
+    const sig = JSON.stringify(filtered);
+    if (sig === lastMergeSigRef.current) {
+      return stableMergesRef.current;
+    }
+    lastMergeSigRef.current = sig;
+    stableMergesRef.current = filtered;
+    return filtered;
+  }, [activeSheet.mergeCells, previewRows, previewCols]);
 
   const renderedColWidths = React.useMemo(() => {
     if (!readOnly) return activeSheet.colWidthsPx;
@@ -303,35 +315,12 @@ const HandsontableWorkbook = React.forwardRef<
     if (dialog) setMenuContainer(dialog);
   }, []);
 
-  const hotTableZoom = React.useMemo(() => {
-    // Keep edit mode unscaled so Handsontable menu/click coordinates
-    // (context menu and dropdown menu) stay aligned with pointer targets.
-    if (!readOnly) return 1;
-    if (hotViewportWidth <= 0) return 1;
-    const colCount = renderedGrid.reduce(
-      (max, row) => Math.max(max, Array.isArray(row) ? row.length : 0),
-      0,
-    );
-    if (colCount <= 0) return 1;
-    const measuredWidths = Array.isArray(renderedColWidths)
-      ? renderedColWidths
-      : [];
-    const widthSample = Math.min(colCount, measuredWidths.length);
-    const sampledWidth = measuredWidths
-      .slice(0, widthSample)
-      .reduce((sum, w) => sum + Math.max(24, Number(w) || 80), 0);
-    const estimatedAvgWidth = widthSample > 0 ? sampledWidth / widthSample : 80;
-    const visibleColsAt100 = Math.floor(hotViewportWidth / estimatedAvgWidth);
-    const overflowAt100 = colCount - visibleColsAt100;
-    // Only zoom when sheet is truly wide; keep normal files at 100%.
-    if (overflowAt100 <= 2) return 1;
-    // For very wide sheets, aim for near-zero overflow so most columns are visible.
-    const targetOverflowCols = overflowAt100 > 12 ? 0 : 1;
-    const targetVisibleCols = Math.max(1, colCount - targetOverflowCols);
-    const targetScale =
-      hotViewportWidth / Math.max(1, targetVisibleCols * estimatedAvgWidth);
-    return Math.max(0.5, Math.min(1, targetScale));
-  }, [readOnly, hotViewportWidth, renderedGrid, renderedColWidths]);
+  const hotTableZoom = React.useMemo(() => 1, [
+    readOnly,
+    hotViewportWidth,
+    renderedGrid,
+    renderedColWidths,
+  ]);
 
   const hotTableScaleStyle = React.useMemo<React.CSSProperties>(() => {
     if (hotTableZoom >= 0.999) return {};
@@ -353,6 +342,8 @@ const HandsontableWorkbook = React.forwardRef<
   // Keep formulas active in preview/runtime mode too, otherwise dependent cells
   // never recalculate when users edit fillable inputs.
   const shouldUseFormulaEngine = currentCellCount <= 20000;
+
+  const [isHotLoading, setIsHotLoading] = React.useState(false);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -810,6 +801,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+      setIsHotLoading(true);
       lastLoadedSheetIndexRef.current = targetIndex;
       lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
       pendingIncomingReloadRef.current = false;
@@ -946,6 +938,7 @@ const HandsontableWorkbook = React.forwardRef<
         });
       }
       preserveScrollOnNextLoadRef.current = true;
+      setIsHotLoading(false);
     },
     [incomingWorkbookKey, readOnly, toVisibleGrid, normalizeLegacyCheckboxValues],
   );
@@ -1593,6 +1586,7 @@ const HandsontableWorkbook = React.forwardRef<
     readOnly,
     renderedColWidths,
     renderedRowHeights,
+    renderedMergeCells,
   ]);
 
   const cellsCallback = React.useCallback(
@@ -1600,6 +1594,31 @@ const HandsontableWorkbook = React.forwardRef<
       const cacheKey = cellCoordKey(row, col);
       const cached = cellsCacheRef.current.get(cacheKey);
       if (cached) return cached;
+      const hot = hotRef.current?.hotInstance;
+      const currentFrame = (hot as any)?._renderCount ?? 0;
+      if (mergeCacheFrameRef.current.frameId !== currentFrame) {
+        const mergePlugin = hot?.getPlugin?.("mergeCells");
+        const allMerges: any[] =
+          mergePlugin?.mergedCellsCollection?.mergedCells || [];
+        const covered = new Set<string>();
+        for (const m of allMerges) {
+          for (let r = m.row; r < m.row + m.rowspan; r++) {
+            for (let c = m.col; c < m.col + m.colspan; c++) {
+              if (r !== m.row || c !== m.col) {
+                covered.add(`${r}:${c}`);
+              }
+            }
+          }
+        }
+        mergeCacheFrameRef.current = {
+          frameId: currentFrame,
+          mergedSet: covered,
+        };
+      }
+      if (mergeCacheFrameRef.current.mergedSet.has(cacheKey)) {
+        cellsCacheRef.current.set(cacheKey, {});
+        return {};
+      }
       const persistedMeta = persistedCellMetaMap.get(cacheKey);
       const cp: any = {};
       const persistedClassName = String(persistedMeta?.className || "");
@@ -1854,15 +1873,15 @@ const HandsontableWorkbook = React.forwardRef<
 
   const afterMergeCells = React.useCallback(() => {
     if (!readOnly) {
-      collectCurrentSheetFromHot(true);
       scheduleUndoRedoRefresh();
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
   }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterUnmergeCells = React.useCallback(() => {
     if (!readOnly) {
-      collectCurrentSheetFromHot(true);
       scheduleUndoRedoRefresh();
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
   }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
@@ -2782,6 +2801,11 @@ const HandsontableWorkbook = React.forwardRef<
           height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
         }}
       >
+        {isHotLoading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
+          </div>
+        )}
         <div style={hotTableScaleStyle}>
           <HotTable
             /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
