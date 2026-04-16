@@ -268,6 +268,25 @@ const HandsontableWorkbook = React.forwardRef<
     return (activeSheet.rowHeightsPx || []).slice(0, previewRows);
   }, [readOnly, activeSheet.rowHeightsPx, previewRows]);
 
+  const estimatedPreviewTableWidth = React.useMemo(() => {
+    if (!readOnly) return 0;
+    const defaultColWidth = 50;
+    const rowHeaderWidth = 50;
+    const widths =
+      Array.isArray(renderedColWidths) && renderedColWidths.length > 0
+        ? renderedColWidths
+        : Array.from({ length: previewCols }, () => defaultColWidth);
+
+    return (
+      rowHeaderWidth +
+      widths.reduce(
+        (total, width) =>
+          total + (Number.isFinite(Number(width)) ? Number(width) : defaultColWidth),
+        0,
+      )
+    );
+  }, [readOnly, renderedColWidths, previewCols]);
+
   /** `stretchH="all"` ignores fixed `colWidthsPx`; only use it when the template has no saved widths. */
   const stretchColumnsInPreview =
     readOnly &&
@@ -315,17 +334,16 @@ const HandsontableWorkbook = React.forwardRef<
     if (dialog) setMenuContainer(dialog);
   }, []);
 
-  const hotTableZoom = React.useMemo(() => 1, [
-    readOnly,
-    hotViewportWidth,
-    renderedGrid,
-    renderedColWidths,
-  ]);
+  const hotTableZoom = React.useMemo(() => {
+    if (!readOnly) return 1;
+    if (hotViewportWidth <= 0 || estimatedPreviewTableWidth <= 0) return 1;
+    return Math.min(1, hotViewportWidth / estimatedPreviewTableWidth);
+  }, [readOnly, hotViewportWidth, estimatedPreviewTableWidth]);
 
   const hotTableScaleStyle = React.useMemo<React.CSSProperties>(() => {
     if (hotTableZoom >= 0.999) return {};
     return {
-      transform: `scaleX(${hotTableZoom})`,
+      transform: `scale(${hotTableZoom})`,
       transformOrigin: "top left",
       width: `${100 / hotTableZoom}%`,
     };
@@ -2128,9 +2146,17 @@ const HandsontableWorkbook = React.forwardRef<
       trimWhitespace: false,
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
       height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
-      renderAllRows: false,
-      viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
-      viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
+      renderAllRows: readOnly ? true : false,
+      viewportRowRenderingOffset: readOnly
+        ? Math.max(previewRows, 1)
+        : lightweightPerformance
+          ? 8
+          : 20,
+      viewportColumnRenderingOffset: readOnly
+        ? Math.max(previewCols, 1)
+        : lightweightPerformance
+          ? 4
+          : 10,
       formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
       mergeCells:
         renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
@@ -2231,6 +2257,8 @@ const HandsontableWorkbook = React.forwardRef<
       readOnlyHotHeight,
       shouldUseFormulaEngine,
       renderedMergeCells,
+      previewRows,
+      previewCols,
       heavyPluginsEnabled,
       hotTableContextMenu,
       menuContainer,
