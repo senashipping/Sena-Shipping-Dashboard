@@ -17,6 +17,7 @@ const FormSubmission: React.FC = () => {
 
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [tableData, setTableData] = useState<any[]>([]);
+  const latestResolvedFormDataRef = React.useRef<Record<string, any>>({});
 
   const { data: form, isLoading: formLoading } = useQuery({
     queryKey: ["form", formId],
@@ -52,6 +53,10 @@ const FormSubmission: React.FC = () => {
       }
     }
   }, [submission, form]);
+
+  React.useEffect(() => {
+    latestResolvedFormDataRef.current = formData;
+  }, [formData]);
 
   // Initialize mixed form table data
   React.useEffect(() => {
@@ -141,9 +146,9 @@ const FormSubmission: React.FC = () => {
     if (form?.data?.data?.formType === "table") {
       submissionFormData = { tableData };
     } else if (form?.data?.data?.formType === "mixed") {
-      submissionFormData = formData;
+      submissionFormData = latestResolvedFormDataRef.current;
     } else {
-      submissionFormData = formData;
+      submissionFormData = latestResolvedFormDataRef.current;
     }
 
     const submissionData = {
@@ -213,12 +218,14 @@ const FormSubmission: React.FC = () => {
             formState={form.data.data}
             formData={formData}
             tableData={tableData}
-
             onFieldChange={handleInputChange}
             onTableChange={handleTableChange}
             onMixedTableChange={handleMixedTableChange}
             onAddTableRow={handleAddTableRow}
             onRemoveTableRow={handleRemoveTableRow}
+            onResolvedFormDataChange={(data) => {
+              latestResolvedFormDataRef.current = data;
+            }}
             useLocalExcelState
             excelReadOnly
             submitButton={

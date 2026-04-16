@@ -162,6 +162,7 @@ interface SharedFormRendererProps {
   lightweightExcelPreview?: boolean;
   useLocalExcelState?: boolean;
   excelReadOnly?: boolean;
+  onResolvedFormDataChange?: (data: Record<string, any>) => void;
 }
 
 const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
@@ -178,6 +179,7 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
   lightweightExcelPreview = false,
   useLocalExcelState = false,
   excelReadOnly = false,
+  onResolvedFormDataChange,
 }) => {
   const [signatureErrors, setSignatureErrors] = React.useState<
     Record<string, string>
@@ -188,6 +190,18 @@ const SharedFormRenderer: React.FC<SharedFormRendererProps> = ({
   const [localExcelState, setLocalExcelState] = React.useState<
     Record<string, any>
   >({});
+
+  const resolvedFormData = React.useMemo(
+    () => ({
+      ...formData,
+      ...localExcelState,
+    }),
+    [formData, localExcelState],
+  );
+
+  React.useEffect(() => {
+    onResolvedFormDataChange?.(resolvedFormData);
+  }, [onResolvedFormDataChange, resolvedFormData]);
 
   const getFilePreview = (
     rawValue: unknown,
