@@ -920,7 +920,6 @@ const HandsontableWorkbook = React.forwardRef<
       // Only restore if the sheet didn't change (user was already on this tab).
       const shouldRestoreScroll =
         preserveScrollOnNextLoadRef.current &&
-        Boolean(saved) &&
         targetIndex === activeSheetIndexRef.current &&
         (savedScrollTop > 0 || savedScrollLeft > 0);
       if (shouldRestoreScroll) {
