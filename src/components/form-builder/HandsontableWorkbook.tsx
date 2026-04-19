@@ -1981,8 +1981,30 @@ const HandsontableWorkbook = React.forwardRef<
   );
 
   const afterSelection = React.useCallback(
-    (r: number, c: number, r2: number, c2: number) => {
+    (
+      r: number,
+      c: number,
+      r2: number,
+      c2: number,
+      preventScrolling?: { value: boolean },
+    ) => {
       const hot = hotRef.current?.hotInstance;
+      // In read-only form preview, Handsontable's default selection scroll runs
+      // `scrollViewportTo` then `scrollIntoView` on the cell (viewportScroll utils).
+      // The latter scrolls the nearest scrollable ancestor — often the Radix dialog
+      // — and fights with user wheel scroll. Suppress auto-scroll for non-keyboard
+      // sources (mouse, unknown, refresh, …) so the page/dialog stays still; keep
+      // keyboard-driven scroll so Tab/arrow can still reach off-screen fillables.
+      if (
+        readOnly &&
+        preventScrolling &&
+        typeof preventScrolling.value === "boolean" &&
+        hot &&
+        typeof hot.selection?.getSelectionSource === "function" &&
+        hot.selection.getSelectionSource() !== "keyboard"
+      ) {
+        preventScrolling.value = true;
+      }
       const rowCount =
         typeof hot?.countRows === "function"
           ? Math.max(1, hot.countRows())
@@ -2010,6 +2032,23 @@ const HandsontableWorkbook = React.forwardRef<
       if (!readOnly) setSelectionLabel(toRangeLabel(range));
     },
     [readOnly, safeGrid],
+  );
+
+  const afterSelectionFocusSet = React.useCallback(
+    (_row: number, _col: number, preventScrolling?: { value: boolean }) => {
+      const hot = hotRef.current?.hotInstance;
+      if (
+        readOnly &&
+        preventScrolling &&
+        typeof preventScrolling.value === "boolean" &&
+        hot &&
+        typeof hot.selection?.getSelectionSource === "function" &&
+        hot.selection.getSelectionSource() !== "keyboard"
+      ) {
+        preventScrolling.value = true;
+      }
+    },
+    [readOnly],
   );
 
   const afterSelectionEnd = React.useCallback(
@@ -2040,30 +2079,10 @@ const HandsontableWorkbook = React.forwardRef<
       sheetSelectionRef.current[activeSheetIndexRef.current] = range;
 
       if (readOnly) {
-        const root = hot.rootElement as HTMLElement | undefined;
-        const container =
-          root?.closest('[role="dialog"]') ??
-          root?.closest(
-            "[data-radix-scroll-area-viewport], .overflow-y-auto, .overflow-auto",
-          ) ??
-          document.documentElement;
-        const savedTop = (container as HTMLElement)?.scrollTop ?? 0;
-        const savedLeft = (container as HTMLElement)?.scrollLeft ?? 0;
-        setSelectionLabel(toRangeLabel(range));
-        const v = hot.getDataAtCell(range.startRow, range.startCol);
-        setFormulaInput(v == null ? "" : String(v));
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            // Only restore scroll for the dialog / local scroll container.
-            // When the fallback is the document element, avoid forcing the
-            // window scroll position, which caused the page to jump back to
-            // the top whenever the selection changed.
-            if (container && container !== document.documentElement) {
-              (container as HTMLElement).scrollTop = savedTop;
-              (container as HTMLElement).scrollLeft = savedLeft;
-            }
-          });
-        });
+        // Preview: toolbar/formula bar are hidden; avoid setState + rAF scroll
+        // "restore" here — it re-rendered the tree and fought HOT / the dialog
+        // scroll position, causing visible jitter. Selection refs are already
+        // updated above (and in afterSelection).
         return;
       }
       setSelectionLabel(toRangeLabel(range));
@@ -2212,6 +2231,7 @@ const HandsontableWorkbook = React.forwardRef<
         ? undefined
         : afterChangeWithEditTracking,
       afterSelection,
+      afterSelectionFocusSet: readOnly ? afterSelectionFocusSet : undefined,
       afterSelectionEnd,
       beforeBeginEditing: disableEditorCompletely
         ? undefined
@@ -2242,6 +2262,7 @@ const HandsontableWorkbook = React.forwardRef<
       afterRowResize,
       afterChangeWithEditTracking,
       afterSelection,
+      afterSelectionFocusSet,
       afterSelectionEnd,
       beforeBeginEditing,
       afterDeselect,
