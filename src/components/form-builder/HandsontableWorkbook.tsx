@@ -397,6 +397,7 @@ const HandsontableWorkbook = React.forwardRef<
   const previewEditingSettleTimerRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const loadedSheetsCacheRef = React.useRef<Set<number>>(new Set());
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
   const mergeCacheFrameRef = React.useRef<{
     frameId: number;
@@ -1333,7 +1334,8 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
-      setIsLoading(true);
+      const shouldShowLoading = !loadedSheetsCacheRef.current.has(targetIndex);
+      if (shouldShowLoading) setIsLoading(true);
       setTimeout(() => {
         try {
           console.log("Step 1: start parsing");
@@ -1476,7 +1478,8 @@ const HandsontableWorkbook = React.forwardRef<
         } catch (err) {
           console.error("Workbook load failed:", err);
         } finally {
-          setIsLoading(false);
+          loadedSheetsCacheRef.current.add(targetIndex);
+          if (shouldShowLoading) setIsLoading(false);
         }
       }, 0);
     },
@@ -1492,7 +1495,7 @@ const HandsontableWorkbook = React.forwardRef<
 
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
-    setIsLoading(true);
+    if (!loadedSheetsCacheRef.current.has(targetIndex)) setIsLoading(true);
     preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
       collectCurrentSheetFromHot(true, activeSheetIndex);
@@ -2128,6 +2131,7 @@ const HandsontableWorkbook = React.forwardRef<
         mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
       ),
     };
+    loadedSheetsCacheRef.current.clear();
     destroyFormulaEngine();
     formulaEngineActivatedRef.current = false;
     const safeIndex = Math.min(
@@ -3610,7 +3614,7 @@ const HandsontableWorkbook = React.forwardRef<
             /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
              * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
              * leak onto another at the same coordinates. */
-            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            key={`ht-wb-${hotTableMountKey}`}
             ref={hotRef}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}
