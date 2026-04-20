@@ -1546,6 +1546,8 @@ const HandsontableWorkbook = React.forwardRef<
         for (let c = range.startCol; c <= range.endCol; c++) {
           hot.setCellMeta(r, c, "className", "");
           hot.setCellMeta(r, c, "type", "text");
+          hot.setCellMeta(r, c, "checkedTemplate", undefined);
+          hot.setCellMeta(r, c, "uncheckedTemplate", undefined);
           hot.setCellMeta(r, c, "numericFormat", undefined);
           hot.setCellMeta(r, c, "dateFormat", undefined);
           hot.setCellMeta(r, c, "correctFormat", undefined);
@@ -1566,6 +1568,22 @@ const HandsontableWorkbook = React.forwardRef<
       sheet.cellMeta = sheet.cellMeta.filter(
         (m) => !clearKeys.has(cellCoordKey(+m.row, +m.col)),
       );
+    }
+    for (const key of clearKeys) {
+      formulaCellSetRef.current.delete(key);
+    }
+
+    // Keep formula engine in sync so dependent cells recalculate immediately.
+    const hf = hfRef.current;
+    const sheetId =
+      hf && sheet ? hf.getSheetId(sheet.name || `Sheet${idx + 1}`) : null;
+    if (hf && sheetId != null) {
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          hf.setCellContents({ sheet: sheetId, row: r, col: c }, [[""]]);
+        }
+      }
+      refreshFormulaDisplays();
     }
 
     collectCurrentSheetFromHot(true);
