@@ -376,9 +376,6 @@ const HandsontableWorkbook = React.forwardRef<
   const formulaInputDebounceTimerRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
-  const gridEditPerfTimerRef = React.useRef<string | null>(null);
-  const sheetSwitchPerfTimerRef = React.useRef<string | null>(null);
-  const firstPaintPerfLoggedRef = React.useRef(false);
   const formulaEngineActivatedRef = React.useRef(false);
   const formulaEngineRef = React.useRef<HyperFormula | null>(null);
   const formulaEngineShapeSignatureRef = React.useRef<string | null>(null);
@@ -424,10 +421,6 @@ const HandsontableWorkbook = React.forwardRef<
   );
   const disableEditorCompletely = readOnly && strictViewOnly;
 
-  const renderCountRef = React.useRef(0);
-  renderCountRef.current += 1;
-  console.log("Grid rendered:", renderCountRef.current);
-
   const cancelScrollRestoreFramePair = React.useCallback(
     (
       rafRef: React.MutableRefObject<{
@@ -446,6 +439,17 @@ const HandsontableWorkbook = React.forwardRef<
     },
     [],
   );
+
+  const scheduleDeferredWork = React.useCallback((work: () => void) => {
+    const run = () => {
+      const ric = (window as any).requestIdleCallback as
+        | ((cb: () => void) => number)
+        | undefined;
+      if (typeof ric === "function") ric(work);
+      else setTimeout(work, 0);
+    };
+    requestAnimationFrame(run);
+  }, []);
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -556,14 +560,6 @@ const HandsontableWorkbook = React.forwardRef<
     if (dialog) setMenuContainer(dialog);
   }, []);
 
-  React.useEffect(() => {
-    if (firstPaintPerfLoggedRef.current) return;
-    firstPaintPerfLoggedRef.current = true;
-    requestAnimationFrame(() => {
-      console.timeEnd("EditWorkbookModalOpenToFirstPaint");
-    });
-  }, []);
-
   const hotTableZoom = React.useMemo(() => 1, [
     readOnly,
     hotViewportWidth,
@@ -580,7 +576,7 @@ const HandsontableWorkbook = React.forwardRef<
     };
   }, [hotTableZoom]);
 
-  const [isHotLoading, setIsHotLoading] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(true);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -1224,10 +1220,9 @@ const HandsontableWorkbook = React.forwardRef<
   ]);
 
   const activateFormulaEngine = React.useCallback(
-    (reason: string) => {
+    (_reason: string) => {
       if (formulaEngineActivatedRef.current) return;
       formulaEngineActivatedRef.current = true;
-      console.log("HyperFormula lazy init triggered by:", reason);
       recalculateWorkbookFormulas();
     },
     [recalculateWorkbookFormulas],
@@ -1340,19 +1335,15 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
-      console.log(
-        "[Workbook lazy-load] loading sheet:",
-        sheet.name,
-        "at",
-        new Date().toISOString(),
-      );
-      setIsHotLoading(true);
-      lastLoadedSheetIndexRef.current = targetIndex;
-      lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
-      pendingIncomingReloadRef.current = false;
-      pendingIncomingReloadSheetIndexRef.current = null;
-      pendingIncomingReloadWorkbookKeyRef.current = null;
-      normalizeLegacyCheckboxValues(sheet);
+      setIsLoading(true);
+      scheduleDeferredWork(() => {
+        try {
+          lastLoadedSheetIndexRef.current = targetIndex;
+          lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
+          pendingIncomingReloadRef.current = false;
+          pendingIncomingReloadSheetIndexRef.current = null;
+          pendingIncomingReloadWorkbookKeyRef.current = null;
+          normalizeLegacyCheckboxValues(sheet);
 
       // Save the HOT grid's pixel scroll position before loadData resets it.
       // hot.loadData() always resets the viewport to (0,0), and the HotTable
@@ -1479,12 +1470,11 @@ const HandsontableWorkbook = React.forwardRef<
           });
         });
       }
-      preserveScrollOnNextLoadRef.current = true;
-      setIsHotLoading(false);
-      if (sheetSwitchPerfTimerRef.current) {
-        console.timeEnd(sheetSwitchPerfTimerRef.current);
-        sheetSwitchPerfTimerRef.current = null;
-      }
+          preserveScrollOnNextLoadRef.current = true;
+        } finally {
+          setIsLoading(false);
+        }
+      });
     },
     [
       incomingWorkbookKey,
@@ -1493,13 +1483,13 @@ const HandsontableWorkbook = React.forwardRef<
       normalizeLegacyCheckboxValues,
       syncFormulaDisplaySetForSheet,
       cancelScrollRestoreFramePair,
+      scheduleDeferredWork,
     ],
   );
 
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
-    sheetSwitchPerfTimerRef.current = `EditWorkbookSheetSwitch:${targetIndex}:${Date.now()}`;
-    console.time(sheetSwitchPerfTimerRef.current);
+    setIsLoading(true);
     preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
       collectCurrentSheetFromHot(true, activeSheetIndex);
@@ -2580,15 +2570,7 @@ const HandsontableWorkbook = React.forwardRef<
   }, [scheduleUndoRedoRefresh]);
 
   const beforeChangeForPerf = React.useCallback(
-    (changes: any, source: string) => {
-      if (disableEditorCompletely) return false;
-      if (!Array.isArray(changes) || changes.length === 0) return;
-      if (source === "edit" || source === "CopyPaste.paste" || source === "Autofill.fill") {
-        const label = `EditWorkbookKeypressToGridUpdate:${Date.now()}`;
-        gridEditPerfTimerRef.current = label;
-        console.time(label);
-      }
-    },
+    () => (disableEditorCompletely ? false : undefined),
     [disableEditorCompletely],
   );
 
@@ -2697,10 +2679,6 @@ const HandsontableWorkbook = React.forwardRef<
   const afterChangeWithEditTracking = React.useCallback(
     (changes: any, source: string) => {
       afterChange(changes, source);
-      if (gridEditPerfTimerRef.current) {
-        console.timeEnd(gridEditPerfTimerRef.current);
-        gridEditPerfTimerRef.current = null;
-      }
       if (!readOnly) {
         const hot = hotRef.current?.hotInstance;
         const isEditorOpen =
@@ -3616,23 +3594,28 @@ const HandsontableWorkbook = React.forwardRef<
           height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
         }}
       >
-        {isHotLoading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
+        {isLoading ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-gray-500">Loading workbook...</p>
+            </div>
           </div>
-        )}
+        ) : null}
         <div style={hotTableScaleStyle}>
-          <HotTable
-            /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
-             * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
-             * leak onto another at the same coordinates. */
-            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
-            ref={hotRef}
-            {...hotTableSettings}
-            manualColumnResize={!readOnly && !lightweightPerformance}
-            manualRowResize={!readOnly && !lightweightPerformance}
-            width={hotViewportWidth > 0 ? hotViewportWidth : "100%"}
-          />
+          {!isLoading ? (
+            <HotTable
+              /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
+               * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
+               * leak onto another at the same coordinates. */
+              key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+              ref={hotRef}
+              {...hotTableSettings}
+              manualColumnResize={!readOnly && !lightweightPerformance}
+              manualRowResize={!readOnly && !lightweightPerformance}
+              width={hotViewportWidth > 0 ? hotViewportWidth : "100%"}
+            />
+          ) : null}
         </div>
       </div>
 

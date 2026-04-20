@@ -650,7 +650,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   type="button"
                   size="sm"
                   onClick={() => {
-                    console.time("EditWorkbookModalOpenToFirstPaint");
                     const cloned = JSON.parse(JSON.stringify(field.excelTemplate));
                     setWorkbookDraft(cloned);
                     setIsWorkbookEditorOpen(true);
@@ -748,13 +747,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         </div>
       )}
       {field.type === "embedded_excel" && (
-        <Dialog
-          open={isWorkbookEditorOpen}
-          onOpenChange={(open) => {
-            if (open) console.time("EditWorkbookModalOpenToFirstPaint");
-            setIsWorkbookEditorOpen(open);
-          }}
-        >
+        <Dialog open={isWorkbookEditorOpen} onOpenChange={(open) => setIsWorkbookEditorOpen(open)}>
           <DialogContent
             className="max-w-[min(96vw,1200px)] max-h-[90vh] overflow-visible"
             onOpenAutoFocus={(event) => {
