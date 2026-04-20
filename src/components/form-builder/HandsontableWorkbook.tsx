@@ -576,7 +576,7 @@ const HandsontableWorkbook = React.forwardRef<
     };
   }, [hotTableZoom]);
 
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [isLoading, setIsLoading] = React.useState(false);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -3603,19 +3603,17 @@ const HandsontableWorkbook = React.forwardRef<
           </div>
         ) : null}
         <div style={hotTableScaleStyle}>
-          {!isLoading ? (
-            <HotTable
-              /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
-               * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
-               * leak onto another at the same coordinates. */
-              key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
-              ref={hotRef}
-              {...hotTableSettings}
-              manualColumnResize={!readOnly && !lightweightPerformance}
-              manualRowResize={!readOnly && !lightweightPerformance}
-              width={hotViewportWidth > 0 ? hotViewportWidth : "100%"}
-            />
-          ) : null}
+          <HotTable
+            /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
+             * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
+             * leak onto another at the same coordinates. */
+            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            ref={hotRef}
+            {...hotTableSettings}
+            manualColumnResize={!readOnly && !lightweightPerformance}
+            manualRowResize={!readOnly && !lightweightPerformance}
+            width={hotViewportWidth > 0 ? hotViewportWidth : "100%"}
+          />
         </div>
       </div>
 
