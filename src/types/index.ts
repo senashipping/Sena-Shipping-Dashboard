@@ -64,7 +64,14 @@ export interface FormField {
       name: string;
       grid: string[][];
       mergeCells?: Array<{ row: number; col: number; rowspan: number; colspan: number }>;
-      cellMeta?: Array<{ row: number; col: number; className?: string; readOnly?: boolean }>;
+      cellMeta?: Array<{
+        row: number;
+        col: number;
+        className?: string;
+        readOnly?: boolean;
+        formula?: string;
+        formulaCachedValue?: string;
+      }>;
     }>;
   };
   placeholder?: string;

@@ -10,6 +10,8 @@ export type SheetData = {
   cellMeta?: Array<{
     row: number;
     col: number;
+    formula?: string;
+    formulaCachedValue?: string;
     className?: string;
     type?: string;
     checkedTemplate?: string;

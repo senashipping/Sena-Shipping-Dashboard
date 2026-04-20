@@ -143,7 +143,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       }
 
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array", cellDates: true, cellStyles: true });
+      const workbook = XLSX.read(buffer, {
+        type: "array",
+        cellDates: true,
+        cellFormula: true,
+        cellNF: true,
+        cellStyles: true,
+      });
       const imageMapBySheet = new Map<string, Array<{ row: number; col: number; rowspan?: number; colspan?: number; dataUrl: string }>>();
       const excelJsSheetMap = new Map<string, any>();
       let excelJsBooleanValueType: unknown = undefined;
@@ -218,10 +224,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           return value;
         };
 
+        const formulaByCoord = new Map<
+          string,
+          { formula: string; formulaCachedValue: string }
+        >();
         const grid = Array.from({ length: rows }, (_, r) =>
           Array.from({ length: cols }, (_, c) => {
             const addr = XLSX.utils.encode_cell({ r: r + range.s.r, c: c + range.s.c });
-            const cell = ws?.[addr] as { w?: unknown; v?: unknown } | undefined;
+            const cell = ws?.[addr] as { w?: unknown; v?: unknown; f?: unknown } | undefined;
             const excelJsCell = excelJsSheet?.getCell(addr);
             const excelJsComparableValue = getExcelJsComparableValue(excelJsCell?.value);
             const isExcelBooleanCell =
@@ -237,6 +247,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               return booleanStringValue ?? String(excelJsComparableValue);
             }
             if (!cell) return "";
+            if (typeof cell.f === "string" && cell.f.trim().length > 0) {
+              const formula = `=${cell.f}`;
+              const cached = cell.v == null ? "" : String(cell.v);
+              formulaByCoord.set(`${r}:${c}`, {
+                formula,
+                formulaCachedValue: cached,
+              });
+              return cached;
+            }
             if (cell.w != null) return String(cell.w);
             if (cell.v == null) return "";
             return String(cell.v);
@@ -252,8 +271,25 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             }))
           : [];
 
-        const cellMeta: Array<{ row: number; col: number; className?: string; type?: string }> = [];
-        const cellMetaByCoord = new Map<string, { row: number; col: number; className?: string; type?: string }>();
+        const cellMeta: Array<{
+          row: number;
+          col: number;
+          className?: string;
+          type?: string;
+          formula?: string;
+          formulaCachedValue?: string;
+        }> = [];
+        const cellMetaByCoord = new Map<
+          string,
+          {
+            row: number;
+            col: number;
+            className?: string;
+            type?: string;
+            formula?: string;
+            formulaCachedValue?: string;
+          }
+        >();
         if (rows * cols <= MAX_STYLE_SCAN_CELLS) {
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
@@ -312,6 +348,23 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             if (existing.className == null) existing.className = "";
           } else {
             const entry = { row, col, type: "checkbox", className: "" };
+            cellMeta.push(entry);
+            cellMetaByCoord.set(coord, entry);
+          }
+        }
+        for (const [coord, formulaMeta] of formulaByCoord.entries()) {
+          const existing = cellMetaByCoord.get(coord);
+          if (existing) {
+            existing.formula = formulaMeta.formula;
+            existing.formulaCachedValue = formulaMeta.formulaCachedValue;
+          } else {
+            const [row, col] = coord.split(":").map(Number);
+            const entry = {
+              row,
+              col,
+              formula: formulaMeta.formula,
+              formulaCachedValue: formulaMeta.formulaCachedValue,
+            };
             cellMeta.push(entry);
             cellMetaByCoord.set(coord, entry);
           }

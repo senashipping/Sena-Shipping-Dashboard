@@ -127,6 +127,11 @@ export const dedupeCellMetaByCoordinate = (
     const next: CellMetaEntry = {
       row,
       col,
+      formula: typeof (raw as any).formula === "string" ? (raw as any).formula : undefined,
+      formulaCachedValue:
+        typeof (raw as any).formulaCachedValue === "string"
+          ? (raw as any).formulaCachedValue
+          : undefined,
       className: raw.className ? String(raw.className) : undefined,
       type: typeof raw.type === "string" ? raw.type : undefined,
       checkedTemplate:
@@ -162,6 +167,9 @@ export const dedupeCellMetaByCoordinate = (
     map.set(key, {
       row,
       col,
+      formula: next.formula ?? (prev as any).formula,
+      formulaCachedValue:
+        next.formulaCachedValue ?? (prev as any).formulaCachedValue,
       className: mergeClassNameStrings(prev.className, next.className),
       type: next.type ?? prev.type,
       checkedTemplate: next.checkedTemplate ?? prev.checkedTemplate,
@@ -197,6 +205,8 @@ export const deepCloneSheet = (s: SheetData): SheetData => ({
     (s.cellMeta || []).map((m) => ({
       row: m.row,
       col: m.col,
+      formula: (m as any).formula,
+      formulaCachedValue: (m as any).formulaCachedValue,
       className: m.className,
       type: m.type,
       checkedTemplate: m.checkedTemplate,
@@ -282,6 +292,11 @@ export const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] =
               .map((m: any) => ({
                 row: +m.row,
                 col: +m.col,
+                formula: typeof m.formula === "string" ? m.formula : undefined,
+                formulaCachedValue:
+                  typeof m.formulaCachedValue === "string"
+                    ? m.formulaCachedValue
+                    : undefined,
                 className:
                   typeof m.className === "string" ? m.className : undefined,
                 type: typeof m.type === "string" ? m.type : undefined,
