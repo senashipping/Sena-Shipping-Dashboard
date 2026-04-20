@@ -440,17 +440,6 @@ const HandsontableWorkbook = React.forwardRef<
     [],
   );
 
-  const scheduleDeferredWork = React.useCallback((work: () => void) => {
-    const run = () => {
-      const ric = (window as any).requestIdleCallback as
-        | ((cb: () => void) => number)
-        | undefined;
-      if (typeof ric === "function") ric(work);
-      else setTimeout(work, 0);
-    };
-    requestAnimationFrame(run);
-  }, []);
-
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
     [data],
@@ -577,6 +566,15 @@ const HandsontableWorkbook = React.forwardRef<
   }, [hotTableZoom]);
 
   const [isLoading, setIsLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!isLoading) return;
+    const timeout = setTimeout(() => {
+      console.warn("Workbook load timeout fallback hit; hiding spinner.");
+      setIsLoading(false);
+    }, 5000);
+    return () => clearTimeout(timeout);
+  }, [isLoading]);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -1336,8 +1334,9 @@ const HandsontableWorkbook = React.forwardRef<
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
       setIsLoading(true);
-      scheduleDeferredWork(() => {
+      setTimeout(() => {
         try {
+          console.log("Step 1: start parsing");
           lastLoadedSheetIndexRef.current = targetIndex;
           lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
           pendingIncomingReloadRef.current = false;
@@ -1358,6 +1357,7 @@ const HandsontableWorkbook = React.forwardRef<
       const savedScrollLeft = masterHolder?.scrollLeft ?? 0;
 
       const visibleGrid = toVisibleGrid(sheet);
+      console.log("Step 2: parsing done");
       const sourceColCount = Math.max(
         1,
         ...((sheet?.grid || []).map((row) =>
@@ -1368,6 +1368,7 @@ const HandsontableWorkbook = React.forwardRef<
       columnStructureDirtyRef.current.set(targetIndex, false);
       syncFormulaDisplaySetForSheet(sheet);
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
+      console.log("Step 3: hyperformula done");
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
       if (!readOnly) {
@@ -1471,10 +1472,13 @@ const HandsontableWorkbook = React.forwardRef<
         });
       }
           preserveScrollOnNextLoadRef.current = true;
+          console.log("Step 4: data ready, hiding spinner");
+        } catch (err) {
+          console.error("Workbook load failed:", err);
         } finally {
           setIsLoading(false);
         }
-      });
+      }, 0);
     },
     [
       incomingWorkbookKey,
@@ -1483,7 +1487,6 @@ const HandsontableWorkbook = React.forwardRef<
       normalizeLegacyCheckboxValues,
       syncFormulaDisplaySetForSheet,
       cancelScrollRestoreFramePair,
-      scheduleDeferredWork,
     ],
   );
 
