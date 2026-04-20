@@ -823,6 +823,8 @@ const HandsontableWorkbook = React.forwardRef<
           metaByKey.set(key, {
             row: meta.row,
             col: meta.col,
+            formula: existing?.formula,
+            formulaCachedValue: existing?.formulaCachedValue,
             className: mergedClassName,
             type: meta.type ? String(meta.type) : existing?.type,
             checkedTemplate:
