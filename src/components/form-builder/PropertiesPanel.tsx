@@ -748,7 +748,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       )}
       {field.type === "embedded_excel" && (
         <Dialog open={isWorkbookEditorOpen} onOpenChange={(open) => setIsWorkbookEditorOpen(open)}>
-          <DialogContent className="max-w-[min(96vw,1200px)] max-h-[90vh] overflow-visible">
+          <DialogContent
+            className="max-w-[min(96vw,1200px)] max-h-[90vh] overflow-visible"
+            onOpenAutoFocus={(event) => {
+              // Keep Radix from force-focusing a dialog control on open.
+              // Handsontable manages cell focus/selection; this avoids focus ping-pong.
+              event.preventDefault();
+            }}
+          >
             <DialogHeader>
               <DialogTitle>Edit Workbook</DialogTitle>
               <DialogDescription>
