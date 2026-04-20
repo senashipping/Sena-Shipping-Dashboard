@@ -1542,17 +1542,27 @@ const HandsontableWorkbook = React.forwardRef<
 
     // 2. Strip HOT's in-memory meta (type reset to "text" so checkbox renderer is removed).
     const stripHotMeta = () => {
+      const clearMetaKey = (row: number, col: number, key: string) => {
+        if (typeof hot.removeCellMeta === "function") {
+          hot.removeCellMeta(row, col, key);
+        } else {
+          hot.setCellMeta(row, col, key, undefined);
+        }
+      };
       for (let r = range.startRow; r <= range.endRow; r++) {
         for (let c = range.startCol; c <= range.endCol; c++) {
-          hot.setCellMeta(r, c, "className", "");
-          hot.setCellMeta(r, c, "type", "text");
-          hot.setCellMeta(r, c, "checkedTemplate", undefined);
-          hot.setCellMeta(r, c, "uncheckedTemplate", undefined);
-          hot.setCellMeta(r, c, "numericFormat", undefined);
-          hot.setCellMeta(r, c, "dateFormat", undefined);
-          hot.setCellMeta(r, c, "correctFormat", undefined);
-          hot.setCellMeta(r, c, "source", undefined);
-          hot.setCellMeta(r, c, "strict", undefined);
+          clearMetaKey(r, c, "className");
+          clearMetaKey(r, c, "type");
+          clearMetaKey(r, c, "checkedTemplate");
+          clearMetaKey(r, c, "uncheckedTemplate");
+          clearMetaKey(r, c, "numericFormat");
+          clearMetaKey(r, c, "dateFormat");
+          clearMetaKey(r, c, "correctFormat");
+          clearMetaKey(r, c, "source");
+          clearMetaKey(r, c, "strict");
+          clearMetaKey(r, c, "renderer");
+          clearMetaKey(r, c, "editor");
+          clearMetaKey(r, c, "readOnly");
         }
       }
     };
@@ -1590,6 +1600,8 @@ const HandsontableWorkbook = React.forwardRef<
     scheduleUndoRedoRefresh();
     hot.render();
     restoreHotRange(hot, range);
+    syncToolbarFromCell(hot, range.startRow, range.startCol);
+    setFormulaInput("");
   };
 
   // ─── merge ──────────────────────────────────────────────────────────────────
