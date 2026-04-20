@@ -43,7 +43,51 @@ export type {
 export { MAX_PREVIEW_COLS, MAX_PREVIEW_ROWS } from "./workbook/workbookTypes";
 
 registerAllModules();
-const FORMULAS_CONFIG = { engine: HyperFormula };
+const FORMULA_PREFIX = "=";
+const EXCEL_ERROR_PREFIX = "#";
+const FORMULA_WARNING_CLASS = "meta-formula-warning";
+
+const isFormulaInput = (value: unknown) =>
+  typeof value === "string" && value.startsWith(FORMULA_PREFIX);
+
+const normalizeFormulaString = (value: unknown) => {
+  if (!isFormulaInput(value)) return null;
+  return String(value);
+};
+
+const toHyperFormulaLiteral = (raw: unknown) => {
+  if (raw == null) return "";
+  if (typeof raw === "number" || typeof raw === "boolean") return raw;
+  const text = String(raw);
+  const trimmed = text.trim();
+  if (!trimmed.length) return "";
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (/^(true|false)$/i.test(trimmed)) return /^true$/i.test(trimmed);
+  return text;
+};
+
+const stringifyHyperFormulaValue = (value: unknown): string => {
+  if (value == null) return "";
+  if (typeof value === "object") {
+    const maybeError = value as { value?: unknown };
+    if (
+      typeof maybeError.value === "string" &&
+      maybeError.value.startsWith(EXCEL_ERROR_PREFIX)
+    ) {
+      if (maybeError.value === "#CYCLE!") return "#CIRC!";
+      return maybeError.value;
+    }
+  }
+  if (typeof value === "string") return value;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "#NUM!";
+  }
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  return String(value);
+};
+
+const isFormulaWarningError = (value: string) =>
+  value === "#NAME?" || value === "#ERROR!";
 
 /** Handsontable text editor — duck-typed (avoid importing private editor class). */
 type HotTextEditorLike = {
@@ -480,18 +524,6 @@ const HandsontableWorkbook = React.forwardRef<
     };
   }, [hotTableZoom]);
 
-  const currentCellCount = React.useMemo(
-    () =>
-      renderedGrid.reduce(
-        (t, row) => t + (Array.isArray(row) ? row.length : 0),
-        0,
-      ),
-    [renderedGrid],
-  );
-  // Keep formulas active in preview/runtime mode too, otherwise dependent cells
-  // never recalculate when users edit fillable inputs.
-  const shouldUseFormulaEngine = currentCellCount <= 20000;
-
   const [isHotLoading, setIsHotLoading] = React.useState(false);
 
   const imageMap = React.useMemo(() => {
@@ -571,8 +603,12 @@ const HandsontableWorkbook = React.forwardRef<
 
   const syncToolbarFromCell = React.useCallback(
     (hot: any, row: number, col: number) => {
+      const sheet = workbookRef.current.sheets[activeSheetIndexRef.current];
       const v = hot.getDataAtCell(row, col);
-      setFormulaInput(v == null ? "" : String(v));
+      const formula = sheet?.cellMeta?.find(
+        (m) => m.row === row && m.col === col,
+      )?.formula;
+      setFormulaInput(formula ?? (v == null ? "" : String(v)));
 
       const cls = String(hot.getCellMeta(row, col)?.className || "");
       const tokens = cls.split(" ").filter(Boolean);
@@ -733,6 +769,9 @@ const HandsontableWorkbook = React.forwardRef<
           metaByKey.set(key, {
             row: meta.row,
             col: meta.col,
+            formula: existing?.formula,
+            formulaCachedValue: existing?.formulaCachedValue,
+            formulaWarning: existing?.formulaWarning,
             className: mergedClassName,
             type: meta.type ? String(meta.type) : existing?.type,
             checkedTemplate:
@@ -869,6 +908,200 @@ const HandsontableWorkbook = React.forwardRef<
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
 
+  const getFormulaForCell = React.useCallback(
+    (sheet: SheetData | undefined, row: number, col: number) => {
+      if (!sheet?.cellMeta?.length) return undefined;
+      return sheet.cellMeta.find((m) => m.row === row && m.col === col)?.formula;
+    },
+    [],
+  );
+
+  const upsertFormulaForCell = React.useCallback(
+    (sheet: SheetData, row: number, col: number, formula: string | null) => {
+      const metaByKey = new Map<string, CellMetaEntry>();
+      for (const meta of sheet.cellMeta || []) {
+        if (!meta || !Number.isFinite(+meta.row) || !Number.isFinite(+meta.col))
+          continue;
+        metaByKey.set(cellCoordKey(+meta.row, +meta.col), {
+          ...meta,
+          row: +meta.row,
+          col: +meta.col,
+        });
+      }
+      const key = cellCoordKey(row, col);
+      const current = metaByKey.get(key) || { row, col };
+      if (formula) {
+        metaByKey.set(key, {
+          ...current,
+          row,
+          col,
+          formula,
+          formulaCachedValue:
+            typeof current.formulaCachedValue === "string"
+              ? current.formulaCachedValue
+              : String(sheet.grid?.[row]?.[col] ?? ""),
+          formulaWarning: false,
+        });
+      } else if (current && Object.prototype.hasOwnProperty.call(current, "formula")) {
+        const next = { ...current };
+        delete (next as { formula?: string }).formula;
+        delete (next as { formulaCachedValue?: string }).formulaCachedValue;
+        delete (next as { formulaWarning?: boolean }).formulaWarning;
+        const hasOtherData = Object.entries(next).some(([k, v]) => {
+          if (k === "row" || k === "col") return false;
+          if (Array.isArray(v)) return v.length > 0;
+          return v !== undefined && v !== null && String(v).length > 0;
+        });
+        if (hasOtherData) metaByKey.set(key, next);
+        else metaByKey.delete(key);
+      }
+      sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
+    },
+    [],
+  );
+
+  const recalculateWorkbookFormulas = React.useCallback(() => {
+    const sheets = workbookRef.current.sheets;
+    if (!Array.isArray(sheets) || sheets.length === 0) return;
+    const hfInput: Record<string, (string | number | boolean)[][]> = {};
+    const maxColsBySheet = new Map<number, number>();
+
+    sheets.forEach((sheet, sheetIdx) => {
+      const maxCols = Math.max(
+        1,
+        ...(sheet.grid || []).map((row) => (Array.isArray(row) ? row.length : 0)),
+      );
+      maxColsBySheet.set(sheetIdx, maxCols);
+      hfInput[sheet.name || `Sheet${sheetIdx + 1}`] = (sheet.grid || [[""]]).map(
+        (row, rowIdx) => {
+          const arr = Array.isArray(row) ? row : [""];
+          return Array.from({ length: maxCols }, (_, colIdx) => {
+            const formula = getFormulaForCell(sheet, rowIdx, colIdx);
+            return formula ?? toHyperFormulaLiteral(arr[colIdx] ?? "");
+          });
+        },
+      );
+    });
+
+    let engine: HyperFormula | null = null;
+    try {
+      engine = HyperFormula.buildFromSheets(hfInput, {
+        licenseKey: "gpl-v3",
+      });
+      sheets.forEach((sheet, sheetIdx) => {
+        const sheetId = engine!.getSheetId(sheet.name || `Sheet${sheetIdx + 1}`);
+        if (sheetId == null) return;
+        const formulaMap = new Map<
+          string,
+          {
+            row: number;
+            col: number;
+            formula: string;
+            formulaCachedValue?: string;
+            formulaWarning?: boolean;
+            className?: string;
+          }
+        >();
+        for (const meta of sheet.cellMeta || []) {
+          if (typeof meta.formula !== "string" || !meta.formula.startsWith("="))
+            continue;
+          formulaMap.set(cellCoordKey(meta.row, meta.col), {
+            row: meta.row,
+            col: meta.col,
+            formula: meta.formula,
+            formulaCachedValue: meta.formulaCachedValue,
+            formulaWarning: meta.formulaWarning,
+            className: meta.className,
+          });
+        }
+        const rows = Math.max(sheet.grid?.length || 0, 1);
+        const cols = maxColsBySheet.get(sheetIdx) || 1;
+        const nextGrid = Array.from({ length: rows }, (_, rowIdx) =>
+          Array.from({ length: cols }, (_, colIdx) => {
+            const key = cellCoordKey(rowIdx, colIdx);
+            const formulaMeta = formulaMap.get(key);
+            if (!formulaMeta?.formula) {
+              return String(sheet.grid?.[rowIdx]?.[colIdx] ?? "");
+            }
+            const value = engine!.getCellValue({ sheet: sheetId, row: rowIdx, col: colIdx });
+            const result = stringifyHyperFormulaValue(value);
+            if (
+              isFormulaWarningError(result) &&
+              typeof formulaMeta.formulaCachedValue === "string"
+            ) {
+              formulaMeta.formulaWarning = true;
+              return formulaMeta.formulaCachedValue;
+            }
+            formulaMeta.formulaWarning = false;
+            formulaMeta.formulaCachedValue = result;
+            return result;
+          }),
+        );
+        const metaByKey = new Map<string, CellMetaEntry>();
+        for (const meta of sheet.cellMeta || []) {
+          if (!meta || !Number.isFinite(+meta.row) || !Number.isFinite(+meta.col))
+            continue;
+          const key = cellCoordKey(+meta.row, +meta.col);
+          metaByKey.set(key, { ...meta, row: +meta.row, col: +meta.col });
+        }
+        for (const [key, fm] of formulaMap.entries()) {
+          const current = metaByKey.get(key) || { row: fm.row, col: fm.col };
+          const classes = String(current.className || "")
+            .split(/\s+/)
+            .filter(Boolean);
+          const withoutWarning = classes.filter((token) => token !== FORMULA_WARNING_CLASS);
+          const className = fm.formulaWarning
+            ? [...withoutWarning, FORMULA_WARNING_CLASS].join(" ").trim()
+            : withoutWarning.join(" ").trim();
+          metaByKey.set(key, {
+            ...current,
+            row: fm.row,
+            col: fm.col,
+            formula: fm.formula,
+            formulaCachedValue: fm.formulaCachedValue,
+            formulaWarning: fm.formulaWarning,
+            className: className || undefined,
+          });
+        }
+        sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
+        sheet.grid = nextGrid;
+      });
+    } catch (error) {
+      sheets.forEach((sheet) => {
+        const formulaKeys = new Set(
+          (sheet.cellMeta || [])
+            .filter((m) => typeof m.formula === "string" && m.formula.startsWith("="))
+            .map((m) => cellCoordKey(m.row, m.col)),
+        );
+        if (!formulaKeys.size) return;
+        sheet.grid = (sheet.grid || [[""]]).map((row, r) =>
+          (Array.isArray(row) ? row : [""]).map((cell, c) =>
+            formulaKeys.has(cellCoordKey(r, c)) ? "#CIRC!" : String(cell ?? ""),
+          ),
+        );
+      });
+      console.error("Failed to evaluate workbook formulas:", error);
+    } finally {
+      engine?.destroy();
+    }
+  }, [getFormulaForCell]);
+
+  const syncFormulaDisplaySetForSheet = React.useCallback((sheet?: SheetData) => {
+    const formulaSet = new Set<string>();
+    for (const meta of sheet?.cellMeta || []) {
+      if (typeof meta.formula === "string" && meta.formula.startsWith("=")) {
+        formulaSet.add(cellCoordKey(meta.row, meta.col));
+      }
+    }
+    formulaCellSetRef.current = formulaSet;
+  }, []);
+
+  const getDisplayInputForCell = React.useCallback(
+    (sheet: SheetData | undefined, row: number, col: number, fallback: unknown) =>
+      getFormulaForCell(sheet, row, col) ?? (fallback == null ? "" : String(fallback)),
+    [getFormulaForCell],
+  );
+
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
       const base = sheet?.grid?.length ? sheet.grid : [[""]];
@@ -979,18 +1212,7 @@ const HandsontableWorkbook = React.forwardRef<
       );
       originalSheetColCountRef.current.set(targetIndex, sourceColCount);
       columnStructureDirtyRef.current.set(targetIndex, false);
-      const formulaSet = new Set<string>();
-      for (let r = 0; r < visibleGrid.length; r++) {
-        const row = visibleGrid[r];
-        if (!Array.isArray(row)) continue;
-        for (let c = 0; c < row.length; c++) {
-          const cell = row[c];
-          if (typeof cell === "string" && cell.startsWith("=")) {
-            formulaSet.add(cellCoordKey(r, c));
-          }
-        }
-      }
-      formulaCellSetRef.current = formulaSet;
+      syncFormulaDisplaySetForSheet(sheet);
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
@@ -1088,7 +1310,13 @@ const HandsontableWorkbook = React.forwardRef<
       preserveScrollOnNextLoadRef.current = true;
       setIsHotLoading(false);
     },
-    [incomingWorkbookKey, readOnly, toVisibleGrid, normalizeLegacyCheckboxValues],
+    [
+      incomingWorkbookKey,
+      readOnly,
+      toVisibleGrid,
+      normalizeLegacyCheckboxValues,
+      syncFormulaDisplaySetForSheet,
+    ],
   );
 
   const handleSheetSwitch = (targetIndex: number) => {
@@ -1570,7 +1798,34 @@ const HandsontableWorkbook = React.forwardRef<
     const workbook = new ExcelJS.Workbook();
     workbookRef.current.sheets.forEach((sheet) => {
       const ws = workbook.addWorksheet(sheet.name || "Sheet");
-      sheet.grid.forEach((row) => ws.addRow(row));
+      const formulaByKey = new Map<string, string>();
+      for (const meta of sheet.cellMeta || []) {
+        if (typeof meta.formula === "string" && meta.formula.startsWith("=")) {
+          formulaByKey.set(cellCoordKey(meta.row, meta.col), meta.formula);
+        }
+      }
+      const rows = Math.max(sheet.grid.length, 1);
+      const cols = Math.max(
+        1,
+        ...sheet.grid.map((row) => (Array.isArray(row) ? row.length : 0)),
+      );
+      for (let r = 0; r < rows; r++) {
+        const row = ws.getRow(r + 1);
+        for (let c = 0; c < cols; c++) {
+          const key = cellCoordKey(r, c);
+          const formula = formulaByKey.get(key);
+          const displayValue = String(sheet.grid?.[r]?.[c] ?? "");
+          if (formula) {
+            row.getCell(c + 1).value = {
+              formula: formula.replace(/^=/, ""),
+              result: displayValue,
+            };
+          } else {
+            row.getCell(c + 1).value = displayValue;
+          }
+        }
+        row.commit();
+      }
     });
     const buf = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buf], {
@@ -1674,6 +1929,12 @@ const HandsontableWorkbook = React.forwardRef<
         mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
       ),
     };
+    recalculateWorkbookFormulas();
+    const safeIndex = Math.min(
+      activeSheetIndexRef.current,
+      Math.max(0, workbookRef.current.sheets.length - 1),
+    );
+    syncFormulaDisplaySetForSheet(workbookRef.current.sheets[safeIndex]);
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1696,7 +1957,12 @@ const HandsontableWorkbook = React.forwardRef<
       // Let loadSheetIntoHot (incomingWorkbookKey) refresh HOT for the
       // preserved tab; avoid forcing sheet 0's grid into state here.
     }
-  }, [normalizedIncomingSheets, readOnly]);
+  }, [
+    normalizedIncomingSheets,
+    readOnly,
+    recalculateWorkbookFormulas,
+    syncFormulaDisplaySetForSheet,
+  ]);
 
   const hotTableMountKey = React.useMemo(
     () => hotTableMountSignature(normalizedIncomingSheets),
@@ -1913,6 +2179,10 @@ const HandsontableWorkbook = React.forwardRef<
           if (vAlignToken)
             s.verticalAlign = vAlignToken.replace("meta-valign-", "");
           if (tokens.includes("meta-wrap")) s.whiteSpace = "normal";
+          if (tokens.includes(FORMULA_WARNING_CLASS)) {
+            s.outline = "1px dashed #f59e0b";
+            s.outlineOffset = "-1px";
+          }
 
           // Runtime fallback for selection visibility:
           // if theme/reset CSS hides HOT's default selection layer, explicitly tint
@@ -2102,6 +2372,38 @@ const HandsontableWorkbook = React.forwardRef<
     scheduleUndoRedoRefresh();
   }, [scheduleUndoRedoRefresh]);
 
+  const handleCellChanges = React.useCallback(
+    (changes: [number, number, unknown, unknown][]) => {
+      const idx = activeSheetIndexRef.current;
+      const sheet = workbookRef.current.sheets[idx];
+      if (!sheet || !Array.isArray(changes) || changes.length === 0) return;
+      let touched = false;
+      for (const [row, col, , newValue] of changes) {
+        if (!Number.isFinite(row) || !Number.isFinite(col) || row < 0 || col < 0)
+          continue;
+        const formula = normalizeFormulaString(newValue);
+        upsertFormulaForCell(sheet, row, col, formula);
+        touched = true;
+      }
+      if (!touched) return;
+      recalculateWorkbookFormulas();
+      syncFormulaDisplaySetForSheet(sheet);
+      const hot = hotRef.current?.hotInstance;
+      if (hot && idx === activeSheetIndexRef.current) {
+        const visibleGrid = toVisibleGrid(sheet);
+        setInitialGrid(visibleGrid);
+      }
+    },
+    [
+      activeSheetIndexRef,
+      hotRef,
+      recalculateWorkbookFormulas,
+      syncFormulaDisplaySetForSheet,
+      toVisibleGrid,
+      upsertFormulaForCell,
+    ],
+  );
+
   const { afterChange } = useWorkbookHotCallbacks({
     hotRef,
     yesNoOppositeCellMapRef,
@@ -2113,6 +2415,7 @@ const HandsontableWorkbook = React.forwardRef<
     isEditingRef,
     pendingReadOnlyEmitRef,
     onReadOnlyEdit: scheduleReadOnlyEmit,
+    onCellChanges: handleCellChanges,
   });
 
   const flushPendingPreviewSyncs = React.useCallback(() => {
@@ -2349,7 +2652,6 @@ const HandsontableWorkbook = React.forwardRef<
       renderAllRows: readOnly,
       viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
-      formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
       mergeCells:
         renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
       filters: heavyPluginsEnabled,
@@ -2458,7 +2760,6 @@ const HandsontableWorkbook = React.forwardRef<
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
-      shouldUseFormulaEngine,
       renderedMergeCells,
       heavyPluginsEnabled,
       hotTableContextMenu,
@@ -2842,7 +3143,10 @@ const HandsontableWorkbook = React.forwardRef<
                   sheetSelectionRef.current[idx] ?? lastSelectionRef.current;
                 if (hot) {
                   const v = hot.getDataAtCell(r.startRow, r.startCol);
-                  setFormulaInput(v == null ? "" : String(v));
+                  const sheet = workbookRef.current.sheets[idx];
+                  setFormulaInput(
+                    getDisplayInputForCell(sheet, r.startRow, r.startCol, v),
+                  );
                   restoreHotRange(hot, r);
                 }
               }
