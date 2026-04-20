@@ -13,7 +13,6 @@ export const useWorkbookHotCallbacks = ({
   isEditingRef,
   pendingReadOnlyEmitRef,
   onReadOnlyEdit,
-  onCellChanges,
 }: {
   hotRef: React.MutableRefObject<any>;
   yesNoOppositeCellMapRef: React.MutableRefObject<
@@ -27,7 +26,6 @@ export const useWorkbookHotCallbacks = ({
   isEditingRef: React.MutableRefObject<boolean>;
   pendingReadOnlyEmitRef: React.MutableRefObject<boolean>;
   onReadOnlyEdit?: () => void;
-  onCellChanges?: (changes: [number, number, unknown, unknown][], source: string) => void;
 }) => {
   const afterChange = React.useCallback(
     (changes: any, source: string) => {
@@ -41,10 +39,6 @@ export const useWorkbookHotCallbacks = ({
           source !== "updateData" &&
           String(source) !== "yesNoSync"
         ) {
-          onCellChanges?.(
-            changes as [number, number, unknown, unknown][],
-            source,
-          );
           if (hot) {
             const oppositeCellByKey = yesNoOppositeCellMapRef.current;
             for (const [row, col, oldValue, newValue] of changes as [
@@ -136,7 +130,6 @@ export const useWorkbookHotCallbacks = ({
       isEditingRef,
       pendingReadOnlyEmitRef,
       onReadOnlyEdit,
-      onCellChanges,
       scheduleUndoRedoRefresh,
       workbookRef,
       yesNoOppositeCellMapRef,

@@ -127,15 +127,6 @@ export const dedupeCellMetaByCoordinate = (
     const next: CellMetaEntry = {
       row,
       col,
-      formula: typeof (raw as any).formula === "string" ? (raw as any).formula : undefined,
-      formulaCachedValue:
-        typeof (raw as any).formulaCachedValue === "string"
-          ? (raw as any).formulaCachedValue
-          : undefined,
-      formulaWarning:
-        typeof (raw as any).formulaWarning === "boolean"
-          ? (raw as any).formulaWarning
-          : undefined,
       className: raw.className ? String(raw.className) : undefined,
       type: typeof raw.type === "string" ? raw.type : undefined,
       checkedTemplate:
@@ -172,12 +163,6 @@ export const dedupeCellMetaByCoordinate = (
       row,
       col,
       className: mergeClassNameStrings(prev.className, next.className),
-      formula: next.formula ?? prev.formula,
-      formulaCachedValue: next.formulaCachedValue ?? prev.formulaCachedValue,
-      formulaWarning:
-        typeof next.formulaWarning === "boolean"
-          ? next.formulaWarning
-          : prev.formulaWarning,
       type: next.type ?? prev.type,
       checkedTemplate: next.checkedTemplate ?? prev.checkedTemplate,
       uncheckedTemplate: next.uncheckedTemplate ?? prev.uncheckedTemplate,
@@ -212,15 +197,6 @@ export const deepCloneSheet = (s: SheetData): SheetData => ({
     (s.cellMeta || []).map((m) => ({
       row: m.row,
       col: m.col,
-      formula: typeof (m as any).formula === "string" ? (m as any).formula : undefined,
-      formulaCachedValue:
-        typeof (m as any).formulaCachedValue === "string"
-          ? (m as any).formulaCachedValue
-          : undefined,
-      formulaWarning:
-        typeof (m as any).formulaWarning === "boolean"
-          ? (m as any).formulaWarning
-          : undefined,
       className: m.className,
       type: m.type,
       checkedTemplate: m.checkedTemplate,
@@ -306,15 +282,6 @@ export const normalizeSheets = (input?: { sheets?: SheetData[] }): SheetData[] =
               .map((m: any) => ({
                 row: +m.row,
                 col: +m.col,
-                formula: typeof m.formula === "string" ? m.formula : undefined,
-                formulaCachedValue:
-                  typeof m.formulaCachedValue === "string"
-                    ? m.formulaCachedValue
-                    : undefined,
-                formulaWarning:
-                  typeof m.formulaWarning === "boolean"
-                    ? m.formulaWarning
-                    : undefined,
                 className:
                   typeof m.className === "string" ? m.className : undefined,
                 type: typeof m.type === "string" ? m.type : undefined,
