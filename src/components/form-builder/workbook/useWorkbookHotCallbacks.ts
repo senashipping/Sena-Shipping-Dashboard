@@ -42,7 +42,8 @@ export const useWorkbookHotCallbacks = ({
           Array.isArray(changes) &&
           changes.length > 0 &&
           source !== "updateData" &&
-          String(source) !== "yesNoSync"
+          String(source) !== "yesNoSync" &&
+          String(source) !== "formulaSync"
         ) {
           onCellChanges?.(
             changes as [number, number, unknown, unknown][],

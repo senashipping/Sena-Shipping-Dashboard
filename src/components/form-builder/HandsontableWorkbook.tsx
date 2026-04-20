@@ -630,12 +630,14 @@ const HandsontableWorkbook = React.forwardRef<
 
   const refreshFormulaDisplays = React.useCallback(() => {
     const hf = hfRef.current;
-    if (!hf) return;
+    if (!hf) return new Map<number, Array<[number, number, string]>>();
     const sheets = workbookRef.current.sheets;
+    const updatesBySheet = new Map<number, Array<[number, number, string]>>();
     for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
       const sheet = sheets[sIdx];
       const sheetId = hf.getSheetId(sheet.name || `Sheet${sIdx + 1}`);
       if (sheetId == null) continue;
+      const updates: Array<[number, number, string]> = [];
       for (const meta of sheet.cellMeta || []) {
         if (typeof meta.formula !== "string" || !meta.formula.startsWith("="))
           continue;
@@ -648,8 +650,11 @@ const HandsontableWorkbook = React.forwardRef<
         meta.formulaCachedValue = display;
         if (!Array.isArray(sheet.grid[meta.row])) sheet.grid[meta.row] = [];
         sheet.grid[meta.row][meta.col] = display;
+        updates.push([meta.row, meta.col, display]);
       }
+      if (updates.length > 0) updatesBySheet.set(sIdx, updates);
     }
+    return updatesBySheet;
   }, []);
 
   const syncToolbarFromCell = React.useCallback(
@@ -2238,9 +2243,14 @@ const HandsontableWorkbook = React.forwardRef<
         }
       }
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
-      refreshFormulaDisplays();
+      const updatesBySheet = refreshFormulaDisplays();
+      const activeUpdates = updatesBySheet.get(sheetIndex) || [];
+      const hot = hotRef.current?.hotInstance;
+      if (hot && activeUpdates.length > 0) {
+        hot.setDataAtCell(activeUpdates, "formulaSync");
+      }
     },
-    [activeSheetIndexRef, workbookRef, refreshFormulaDisplays],
+    [activeSheetIndexRef, workbookRef, refreshFormulaDisplays, hotRef],
   );
 
   const { afterChange } = useWorkbookHotCallbacks({
