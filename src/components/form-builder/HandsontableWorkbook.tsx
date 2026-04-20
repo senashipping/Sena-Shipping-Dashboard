@@ -376,6 +376,10 @@ const HandsontableWorkbook = React.forwardRef<
   const formulaInputDebounceTimerRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const gridEditPerfTimerRef = React.useRef<string | null>(null);
+  const sheetSwitchPerfTimerRef = React.useRef<string | null>(null);
+  const firstPaintPerfLoggedRef = React.useRef(false);
+  const formulaEngineActivatedRef = React.useRef(false);
   const formulaEngineRef = React.useRef<HyperFormula | null>(null);
   const formulaEngineShapeSignatureRef = React.useRef<string | null>(null);
   const formulaCellSetRef = React.useRef<Set<string>>(new Set());
@@ -419,6 +423,10 @@ const HandsontableWorkbook = React.forwardRef<
     null,
   );
   const disableEditorCompletely = readOnly && strictViewOnly;
+
+  const renderCountRef = React.useRef(0);
+  renderCountRef.current += 1;
+  console.log("Grid rendered:", renderCountRef.current);
 
   const cancelScrollRestoreFramePair = React.useCallback(
     (
@@ -546,6 +554,14 @@ const HandsontableWorkbook = React.forwardRef<
       '[role="dialog"]',
     ) as HTMLElement | null;
     if (dialog) setMenuContainer(dialog);
+  }, []);
+
+  React.useEffect(() => {
+    if (firstPaintPerfLoggedRef.current) return;
+    firstPaintPerfLoggedRef.current = true;
+    requestAnimationFrame(() => {
+      console.timeEnd("EditWorkbookModalOpenToFirstPaint");
+    });
   }, []);
 
   const hotTableZoom = React.useMemo(() => 1, [
@@ -1079,6 +1095,7 @@ const HandsontableWorkbook = React.forwardRef<
   const recalculateWorkbookFormulas = React.useCallback((changes?: FormulaCellChange[]) => {
     const sheets = workbookRef.current.sheets;
     if (!Array.isArray(sheets) || sheets.length === 0) return;
+    if (!formulaEngineActivatedRef.current) return;
     if (!workbookHasAnyFormula(sheets)) {
       destroyFormulaEngine();
       return;
@@ -1206,6 +1223,26 @@ const HandsontableWorkbook = React.forwardRef<
     destroyFormulaEngine,
   ]);
 
+  const activateFormulaEngine = React.useCallback(
+    (reason: string) => {
+      if (formulaEngineActivatedRef.current) return;
+      formulaEngineActivatedRef.current = true;
+      console.log("HyperFormula lazy init triggered by:", reason);
+      recalculateWorkbookFormulas();
+    },
+    [recalculateWorkbookFormulas],
+  );
+
+  React.useEffect(() => {
+    if (
+      typeof formulaInputDraft === "string" &&
+      formulaInputDraft.startsWith("=") &&
+      !formulaEngineActivatedRef.current
+    ) {
+      activateFormulaEngine("formula-cell-selected");
+    }
+  }, [formulaInputDraft, activateFormulaEngine]);
+
   const syncFormulaDisplaySetForSheet = React.useCallback((sheet?: SheetData) => {
     const formulaSet = new Set<string>();
     for (const meta of sheet?.cellMeta || []) {
@@ -1303,6 +1340,12 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+      console.log(
+        "[Workbook lazy-load] loading sheet:",
+        sheet.name,
+        "at",
+        new Date().toISOString(),
+      );
       setIsHotLoading(true);
       lastLoadedSheetIndexRef.current = targetIndex;
       lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
@@ -1438,6 +1481,10 @@ const HandsontableWorkbook = React.forwardRef<
       }
       preserveScrollOnNextLoadRef.current = true;
       setIsHotLoading(false);
+      if (sheetSwitchPerfTimerRef.current) {
+        console.timeEnd(sheetSwitchPerfTimerRef.current);
+        sheetSwitchPerfTimerRef.current = null;
+      }
     },
     [
       incomingWorkbookKey,
@@ -1451,6 +1498,8 @@ const HandsontableWorkbook = React.forwardRef<
 
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
+    sheetSwitchPerfTimerRef.current = `EditWorkbookSheetSwitch:${targetIndex}:${Date.now()}`;
+    console.time(sheetSwitchPerfTimerRef.current);
     preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
       collectCurrentSheetFromHot(true, activeSheetIndex);
@@ -1933,6 +1982,9 @@ const HandsontableWorkbook = React.forwardRef<
     const nextValue = formulaInputDebounceTimerRef.current
       ? formulaInputDraft
       : formulaInput;
+    if (typeof nextValue === "string" && nextValue.startsWith("=")) {
+      activateFormulaEngine("formula-bar-apply");
+    }
     hot.setDataAtCell(range.startRow, range.startCol, nextValue);
     collectCurrentSheetFromHot(false);
     restoreHotRange(hot, range);
@@ -2083,7 +2135,8 @@ const HandsontableWorkbook = React.forwardRef<
         mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
       ),
     };
-    recalculateWorkbookFormulas();
+    destroyFormulaEngine();
+    formulaEngineActivatedRef.current = false;
     const safeIndex = Math.min(
       activeSheetIndexRef.current,
       Math.max(0, workbookRef.current.sheets.length - 1),
@@ -2114,7 +2167,7 @@ const HandsontableWorkbook = React.forwardRef<
   }, [
     normalizedIncomingSheets,
     readOnly,
-    recalculateWorkbookFormulas,
+    destroyFormulaEngine,
     syncFormulaDisplaySetForSheet,
   ]);
 
@@ -2526,6 +2579,19 @@ const HandsontableWorkbook = React.forwardRef<
     scheduleUndoRedoRefresh();
   }, [scheduleUndoRedoRefresh]);
 
+  const beforeChangeForPerf = React.useCallback(
+    (changes: any, source: string) => {
+      if (disableEditorCompletely) return false;
+      if (!Array.isArray(changes) || changes.length === 0) return;
+      if (source === "edit" || source === "CopyPaste.paste" || source === "Autofill.fill") {
+        const label = `EditWorkbookKeypressToGridUpdate:${Date.now()}`;
+        gridEditPerfTimerRef.current = label;
+        console.time(label);
+      }
+    },
+    [disableEditorCompletely],
+  );
+
   const handleCellChanges = React.useCallback(
     (changes: [number, number, unknown, unknown][]) => {
       const idx = activeSheetIndexRef.current;
@@ -2537,6 +2603,7 @@ const HandsontableWorkbook = React.forwardRef<
         if (!Number.isFinite(row) || !Number.isFinite(col) || row < 0 || col < 0)
           continue;
         const formula = normalizeFormulaString(newValue);
+        if (formula) activateFormulaEngine("formula-typed");
         upsertFormulaForCell(sheet, row, col, formula);
         normalizedChanges.push({ sheetIndex: idx, row, col, rawValue: newValue });
         touched = true;
@@ -2557,6 +2624,7 @@ const HandsontableWorkbook = React.forwardRef<
       syncFormulaDisplaySetForSheet,
       toVisibleGrid,
       upsertFormulaForCell,
+      activateFormulaEngine,
     ],
   );
 
@@ -2629,6 +2697,10 @@ const HandsontableWorkbook = React.forwardRef<
   const afterChangeWithEditTracking = React.useCallback(
     (changes: any, source: string) => {
       afterChange(changes, source);
+      if (gridEditPerfTimerRef.current) {
+        console.timeEnd(gridEditPerfTimerRef.current);
+        gridEditPerfTimerRef.current = null;
+      }
       if (!readOnly) {
         const hot = hotRef.current?.hotInstance;
         const isEditorOpen =
@@ -2908,7 +2980,7 @@ const HandsontableWorkbook = React.forwardRef<
       autoWrapCol: true,
       cells: cellsCallback,
       afterGetCellMeta,
-      beforeChange: disableEditorCompletely ? () => false : undefined,
+      beforeChange: beforeChangeForPerf,
       afterColumnResize,
       afterRowResize,
       afterChange: disableEditorCompletely
@@ -2951,6 +3023,7 @@ const HandsontableWorkbook = React.forwardRef<
       disableEditorCompletely,
       cellsCallback,
       afterGetCellMeta,
+      beforeChangeForPerf,
       afterColumnResize,
       afterRowResize,
       afterChangeWithEditTracking,
