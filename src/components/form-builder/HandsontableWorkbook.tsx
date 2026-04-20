@@ -1085,6 +1085,50 @@ const HandsontableWorkbook = React.forwardRef<
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
       if (!readOnly) {
+        // Hard-reset HOT's cached per-cell meta before applying the target sheet's
+        // metadata so formatting from other sheets cannot leak by coordinates.
+        const clearKeys = [
+          "className",
+          "type",
+          "checkedTemplate",
+          "uncheckedTemplate",
+          "dateFormat",
+          "correctFormat",
+          "numericFormat",
+          "source",
+          "strict",
+          "renderer",
+          "editor",
+          "readOnly",
+        ] as const;
+        const clearCellsMeta = () => {
+          const seen = new Set<string>();
+          const cellsMeta =
+            typeof hot.getCellsMeta === "function" ? hot.getCellsMeta() : [];
+          for (const meta of cellsMeta || []) {
+            if (
+              typeof meta?.row !== "number" ||
+              typeof meta?.col !== "number" ||
+              meta.row < 0 ||
+              meta.col < 0
+            ) {
+              continue;
+            }
+            const key = cellCoordKey(meta.row, meta.col);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            for (const metaKey of clearKeys) {
+              if (typeof hot.removeCellMeta === "function") {
+                hot.removeCellMeta(meta.row, meta.col, metaKey);
+              } else {
+                hot.setCellMeta(meta.row, meta.col, metaKey, undefined);
+              }
+            }
+          }
+        };
+        if (typeof hot.batch === "function") hot.batch(clearCellsMeta);
+        else clearCellsMeta();
+
         for (const meta of dedupeCellMetaByCoordinate(sheet.cellMeta || [])) {
           if (meta.className)
             hot.setCellMeta(meta.row, meta.col, "className", meta.className);
