@@ -45,6 +45,156 @@ export { MAX_PREVIEW_COLS, MAX_PREVIEW_ROWS } from "./workbook/workbookTypes";
 registerAllModules();
 const FORMULAS_CONFIG = { engine: HyperFormula };
 
+<<<<<<< HEAD
+=======
+/** Handsontable text editor — duck-typed (avoid importing private editor class). */
+type HotTextEditorLike = {
+  TEXTAREA?: HTMLTextAreaElement;
+  TEXTAREA_PARENT?: HTMLDivElement;
+  row: number;
+  col: number;
+  TD?: HTMLTableCellElement | null;
+  autoResize?: { unObserve?: () => void };
+};
+
+/** Match template styling: only `meta-wrap` marks a multi-line cell in our renderer. */
+function cellHasMetaWrap(meta: { className?: string }) {
+  return String(meta?.className || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .includes("meta-wrap");
+}
+
+function getMergedRegionFromHot(
+  hot: any,
+  row: number,
+  col: number,
+): { row: number; col: number; rowspan: number; colspan: number } | null {
+  const merged = hot?.getPlugin?.("mergeCells")?.mergedCellsCollection?.get?.(
+    row,
+    col,
+  );
+  if (!merged || merged === false) return null;
+  return {
+    row: merged.row,
+    col: merged.col,
+    rowspan: merged.rowspan,
+    colspan: merged.colspan,
+  };
+}
+
+function sumColWidthsForMerge(hot: any, merge: { col: number; colspan: number }) {
+  let sum = 0;
+  for (let c = merge.col; c < merge.col + merge.colspan; c++) {
+    const w =
+      typeof hot?.getColWidth === "function" ? Number(hot.getColWidth(c)) : NaN;
+    sum += Number.isFinite(w) && w > 0 ? w : 50;
+  }
+  return sum;
+}
+
+function sumRowHeightsForMerge(hot: any, merge: { row: number; rowspan: number }) {
+  let sum = 0;
+  for (let r = merge.row; r < merge.row + merge.rowspan; r++) {
+    const h =
+      typeof hot?.getRowHeight === "function" ? Number(hot.getRowHeight(r)) : NaN;
+    sum += Number.isFinite(h) && h > 0 ? h : 23;
+  }
+  return sum;
+}
+
+/**
+ * Sizes the default TEXTAREA editor to the rendered TD (merged colspan/rowspan
+ * included). Disables HOT's autoResize observer so it cannot shrink the editor
+ * to a single-column text measure.
+ */
+function syncHandsontableTextEditorToCell(hot: any) {
+  if (!hot) return;
+  const opened =
+    typeof hot.isEditorOpened === "function" && hot.isEditorOpened();
+  if (!opened) return;
+  const editor = hot.getActiveEditor?.() as HotTextEditorLike | undefined;
+  const ta = editor?.TEXTAREA;
+  const holder = editor?.TEXTAREA_PARENT;
+  if (!editor || !ta || !holder) return;
+
+  editor.autoResize?.unObserve?.();
+
+  const row = editor.row;
+  const col = editor.col;
+  const td =
+    (editor.TD as HTMLTableCellElement | null | undefined) ??
+    (hot.getCell(row, col, true) as HTMLTableCellElement | null);
+  if (!td) return;
+
+  const merge = getMergedRegionFromHot(hot, row, col);
+  const rect = td.getBoundingClientRect();
+  let cellW = Math.max(1, Math.round(rect.width));
+  let cellH = Math.max(1, Math.round(rect.height));
+  if (merge) {
+    const sumW = Math.round(sumColWidthsForMerge(hot, merge));
+    const sumH = Math.round(sumRowHeightsForMerge(hot, merge));
+    if (sumW > 0) cellW = Math.max(cellW, sumW);
+    if (sumH > 0) cellH = Math.max(cellH, sumH);
+  }
+
+  const meta = hot.getCellMeta(row, col) as { className?: string };
+  const wraps = cellHasMetaWrap(meta);
+
+  const hs = holder.style;
+  const ts = ta.style;
+
+  hs.boxSizing = "border-box";
+  hs.width = `${cellW}px`;
+  hs.minWidth = `${cellW}px`;
+  hs.maxWidth = `${cellW}px`;
+  hs.overflow = "hidden";
+
+  ts.boxSizing = "border-box";
+  ts.width = "100%";
+  ts.minWidth = "100%";
+  ts.maxWidth = "100%";
+  ts.margin = "0";
+  ts.resize = "none";
+
+  const tdStyle = hot.rootWindow.getComputedStyle(td);
+  ts.fontSize = tdStyle.fontSize;
+  ts.fontFamily = tdStyle.fontFamily;
+  ts.lineHeight = tdStyle.lineHeight;
+  ts.padding = `${tdStyle.paddingTop} ${tdStyle.paddingRight} ${tdStyle.paddingBottom} ${tdStyle.paddingLeft}`;
+
+  if (wraps) {
+    ts.whiteSpace = "pre-wrap";
+    ts.wordBreak = "break-word";
+    ts.overflowX = "hidden";
+    ts.overflowY = "auto";
+    const grow = () => {
+      ts.height = "auto";
+      const innerMin = Math.max(18, cellH - 2);
+      const nextH = Math.max(innerMin, ta.scrollHeight);
+      ts.minHeight = `${innerMin}px`;
+      ts.height = `${nextH}px`;
+      hs.minHeight = `${cellH}px`;
+      hs.height = `${Math.max(cellH, nextH + 2)}px`;
+      hs.maxHeight = "none";
+    };
+    grow();
+    (ta as any).__htGrowWrap = grow;
+  } else {
+    delete (ta as any).__htGrowWrap;
+    ts.whiteSpace = "pre";
+    ts.overflowX = "auto";
+    ts.overflowY = "hidden";
+    ts.height = `${cellH}px`;
+    ts.minHeight = `${cellH}px`;
+    ts.maxHeight = `${cellH}px`;
+    hs.height = `${cellH}px`;
+    hs.minHeight = `${cellH}px`;
+    hs.maxHeight = `${cellH}px`;
+  }
+}
+
+>>>>>>> parent of 0ffd97e (fix: formula v1)
 // Prevent toolbar buttons from stealing focus from the grid
 const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 
