@@ -39,6 +39,7 @@ export interface HandsontableWorkbookProps {
   onChange: (next: { sheets: SheetData[] }) => void;
   readOnly?: boolean;
   strictViewOnly?: boolean;
+  allowReadOnlyWorkbookActions?: boolean;
   readOnlyHotHeight?: number;
   lightweightPerformance?: boolean;
 }

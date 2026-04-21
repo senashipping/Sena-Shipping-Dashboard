@@ -236,6 +236,7 @@ const FormSubmission: React.FC = () => {
             }}
             useLocalExcelState
             excelReadOnly
+            allowReadOnlyWorkbookActions
             submitButton={
               <Button
                 type="submit"

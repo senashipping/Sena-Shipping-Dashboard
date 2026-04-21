@@ -77,6 +77,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   fieldName: string;
   workbook: { sheets: any[] };
   excelReadOnly: boolean;
+  allowReadOnlyWorkbookActions: boolean;
   useLocalExcelState: boolean;
   setLocalExcelState: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   onFieldChange: (fieldName: string, value: any) => void;
@@ -85,6 +86,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
   fieldName,
   workbook,
   excelReadOnly,
+  allowReadOnlyWorkbookActions,
   useLocalExcelState,
   setLocalExcelState,
   onFieldChange,
@@ -133,6 +135,7 @@ const EmbeddedExcelHandsontableBlock: React.FC<{
           ref={workbookComponentRef}
           data={data}
           readOnly={excelReadOnly}
+          allowReadOnlyWorkbookActions={allowReadOnlyWorkbookActions}
           readOnlyHotHeight={readOnlyHotHeight}
           onChange={handleWorkbookChange}
         />
@@ -167,6 +170,7 @@ interface SharedFormRendererProps {
   lightweightExcelPreview?: boolean;
   useLocalExcelState?: boolean;
   excelReadOnly?: boolean;
+  allowReadOnlyWorkbookActions?: boolean;
   onResolvedFormDataChange?: (data: Record<string, any>) => void;
 }
 
@@ -191,6 +195,7 @@ const SharedFormRenderer = React.forwardRef<
   lightweightExcelPreview = false,
   useLocalExcelState = false,
   excelReadOnly = false,
+  allowReadOnlyWorkbookActions = false,
   onResolvedFormDataChange,
 }, ref) {
   const [signatureErrors, setSignatureErrors] = React.useState<
@@ -556,6 +561,7 @@ const SharedFormRenderer = React.forwardRef<
             fieldName={field.name}
             workbook={workbook}
             excelReadOnly={excelReadOnly}
+            allowReadOnlyWorkbookActions={allowReadOnlyWorkbookActions}
             useLocalExcelState={useLocalExcelState}
             setLocalExcelState={setLocalExcelState}
             onFieldChange={onFieldChange}

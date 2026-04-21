@@ -115,6 +115,7 @@ const PreviewForm: FC<PreviewFormProps> = ({
       onRemoveTableRow={handleRemoveTableRow}
       useLocalExcelState
       excelReadOnly
+      allowReadOnlyWorkbookActions
       submitButton={submitButton}
     />
   );

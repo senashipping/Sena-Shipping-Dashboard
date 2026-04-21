@@ -259,6 +259,7 @@ const HandsontableWorkbook = React.forwardRef<
     onChange,
     readOnly = false,
     strictViewOnly = false,
+    allowReadOnlyWorkbookActions = false,
     readOnlyHotHeight,
     lightweightPerformance = false,
   },
@@ -375,6 +376,10 @@ const HandsontableWorkbook = React.forwardRef<
     null,
   );
   const disableEditorCompletely = readOnly && strictViewOnly;
+  const canUseReadOnlyWorkbookActions =
+    readOnly && !strictViewOnly && allowReadOnlyWorkbookActions;
+  const showFormulaBar = !readOnly || canUseReadOnlyWorkbookActions;
+  const showSheetActions = !readOnly || canUseReadOnlyWorkbookActions;
 
   const normalizedIncomingSheets = React.useMemo(
     () => normalizeSheets(data),
@@ -1691,7 +1696,7 @@ const HandsontableWorkbook = React.forwardRef<
 
   const applyFormulaBar = () => {
     const hot = hotRef.current?.hotInstance;
-    if (!hot || readOnly) return;
+    if (!hot || (readOnly && !canUseReadOnlyWorkbookActions)) return;
     const range = getToolbarActionRange(hot);
     if (!range) return;
     hot.setDataAtCell(range.startRow, range.startCol, formulaInput);
@@ -3023,7 +3028,7 @@ const HandsontableWorkbook = React.forwardRef<
         </div>
       )}
 
-      {!readOnly && (
+      {showFormulaBar && (
         <div className="relative z-10 flex items-center gap-2 p-2 border rounded-md bg-white">
           <span className="text-xs text-gray-500 font-medium w-12 shrink-0">
             {selectionLabel}
@@ -3087,7 +3092,7 @@ const HandsontableWorkbook = React.forwardRef<
           ))}
         </div>
 
-        {!readOnly && (
+      {showSheetActions && (
           <div className="flex flex-wrap items-center gap-2">
             {renaming ? (
               <div className="flex items-center gap-1">
@@ -3161,32 +3166,34 @@ const HandsontableWorkbook = React.forwardRef<
               </Button>
             )}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="text-green-900 border-green-500 bg-green-300 hover:bg-green-400"
-              onMouseDown={noFocusSteal}
-              onClick={() => {
-                const nextSheets = [
-                  ...safeSheets,
-                  { name: `Sheet${safeSheets.length + 1}`, grid: [[""]] },
-                ];
-                workbookRef.current.sheets = nextSheets;
-                setSheetTabs(
-                  nextSheets.map((s) => ({
-                    name: s.name,
-                    tabColor: s.tabColor,
-                  })),
-                );
-                setInitialGrid(
-                  toVisibleGrid(nextSheets[nextSheets.length - 1]),
-                );
-                setActiveSheetIndex(nextSheets.length - 1);
-              }}
-            >
-              + Add Sheet
-            </Button>
+            {!readOnly && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-green-900 border-green-500 bg-green-300 hover:bg-green-400"
+                onMouseDown={noFocusSteal}
+                onClick={() => {
+                  const nextSheets = [
+                    ...safeSheets,
+                    { name: `Sheet${safeSheets.length + 1}`, grid: [[""]] },
+                  ];
+                  workbookRef.current.sheets = nextSheets;
+                  setSheetTabs(
+                    nextSheets.map((s) => ({
+                      name: s.name,
+                      tabColor: s.tabColor,
+                    })),
+                  );
+                  setInitialGrid(
+                    toVisibleGrid(nextSheets[nextSheets.length - 1]),
+                  );
+                  setActiveSheetIndex(nextSheets.length - 1);
+                }}
+              >
+                + Add Sheet
+              </Button>
+            )}
 
             <TB onClick={duplicateActiveSheet} title="Duplicate active sheet">
               ⧉ Duplicate
@@ -3198,34 +3205,38 @@ const HandsontableWorkbook = React.forwardRef<
               Move →
             </TB>
 
-            <input
-              type="color"
-              className="w-8 h-8 p-0 border rounded cursor-pointer"
-              title="Sheet tab color"
-              onMouseDown={noFocusSteal}
-              onChange={(e) => applySheetColor(e.target.value)}
-            />
+            {!readOnly && (
+              <>
+                <input
+                  type="color"
+                  className="w-8 h-8 p-0 border rounded cursor-pointer"
+                  title="Sheet tab color"
+                  onMouseDown={noFocusSteal}
+                  onChange={(e) => applySheetColor(e.target.value)}
+                />
 
-            <span className="mx-1 h-6 border-l" />
+                <span className="mx-1 h-6 border-l" />
 
-            <TB
-              onClick={setYesNoToggle}
-              title="Select 2 side-by-side cells to create mutually exclusive YES/NO toggle checkboxes"
-            >
-              ☑ YES/NO
-            </TB>
-            <TB
-              onClick={setSingleCheckbox}
-              title="Insert a standalone checkbox in each selected cell"
-            >
-              ☑ Checkbox
-            </TB>
-            <TB
-              onClick={toggleFillableSelection}
-              title="Toggle selected cells between fillable and not fillable in Preview/runtime mode"
-            >
-              ✏ Fillable
-            </TB>
+                <TB
+                  onClick={setYesNoToggle}
+                  title="Select 2 side-by-side cells to create mutually exclusive YES/NO toggle checkboxes"
+                >
+                  ☑ YES/NO
+                </TB>
+                <TB
+                  onClick={setSingleCheckbox}
+                  title="Insert a standalone checkbox in each selected cell"
+                >
+                  ☑ Checkbox
+                </TB>
+                <TB
+                  onClick={toggleFillableSelection}
+                  title="Toggle selected cells between fillable and not fillable in Preview/runtime mode"
+                >
+                  ✏ Fillable
+                </TB>
+              </>
+            )}
           </div>
         )}
       </div>
