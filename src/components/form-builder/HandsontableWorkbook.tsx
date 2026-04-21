@@ -2375,6 +2375,11 @@ const HandsontableWorkbook = React.forwardRef<
           hf.setCellContents({ sheet: sheetId, row, col }, [[valueText]]);
         }
       }
+      // Ensure cross-sheet dependencies are recomputed before we refresh display
+      // values; otherwise dependent formulas can keep stale cached values.
+      if (typeof (hf as any).rebuildAndRecalculate === "function") {
+        (hf as any).rebuildAndRecalculate();
+      }
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       const updatesBySheet = refreshFormulaDisplays();
       const activeUpdates = updatesBySheet.get(sheetIndex) || [];
