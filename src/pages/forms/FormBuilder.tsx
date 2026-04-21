@@ -629,6 +629,40 @@ const FormBuilder: React.FC = () => {
     }
   };
 
+  React.useEffect(() => {
+    if (!selectedItem) return;
+
+    let latestData: FormField | FormSection | TableConfig | undefined;
+    if (selectedItem.type === "field") {
+      latestData =
+        formState.fields.find((f) => f.id === selectedItem.id) ||
+        formState.sections.flatMap((s) => s.fields || []).find((f) => f.id === selectedItem.id);
+    } else if (selectedItem.type === "section") {
+      latestData = formState.sections.find((s) => s.id === selectedItem.id);
+    } else {
+      latestData =
+        (formState.tableConfig?.id === selectedItem.id
+          ? formState.tableConfig
+          : formState.sections.find((s) => s.tableConfig?.id === selectedItem.id)?.tableConfig) ||
+        undefined;
+    }
+
+    if (!latestData) {
+      setSelectedItem(null);
+      return;
+    }
+    if (latestData !== selectedItem.data) {
+      setSelectedItem((prev) =>
+        prev
+          ? {
+              ...prev,
+              data: latestData as FormField | FormSection | TableConfig,
+            }
+          : prev,
+      );
+    }
+  }, [formState, selectedItem]);
+
   const handleSubmit = (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
 
