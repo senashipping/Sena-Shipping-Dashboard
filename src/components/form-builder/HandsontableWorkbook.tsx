@@ -288,13 +288,7 @@ const HandsontableWorkbook = React.forwardRef<
       tabColor: s.tabColor,
     })),
   );
-  const [initialGrid, setInitialGrid] = React.useState<string[][]>(() => {
-    const first = workbookRef.current.sheets[0];
-    const base =
-      Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
-    if (!readOnly) return cloneEditableGrid(base);
-    return cloneEditableGrid(base);
-  });
+  const stableEmptyGridRef = React.useRef<string[][]>([[""]]);
 
   const [renaming, setRenaming] = React.useState(false);
   const [renameValue, setRenameValue] = React.useState("");
@@ -314,6 +308,7 @@ const HandsontableWorkbook = React.forwardRef<
     "top" | "middle" | "bottom" | null
   >(null);
   const [selectionLabel, setSelectionLabel] = React.useState("A1");
+  const selectionLabelRef = React.useRef("A1");
   const [canUndo, setCanUndo] = React.useState(false);
   const [canRedo, setCanRedo] = React.useState(false);
 
@@ -376,6 +371,12 @@ const HandsontableWorkbook = React.forwardRef<
   const pendingScrollRestoreNestedRafRef = React.useRef<number | null>(null);
   const pendingEditorLayoutRafRef = React.useRef<number | null>(null);
   const pendingEditorLayoutNestedRafRef = React.useRef<number | null>(null);
+  const debouncedEmitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const debouncedSelectionLabelTimerRef = React.useRef<
+    ReturnType<typeof setTimeout> | null
+  >(null);
   // The dialog element (if any) that wraps this component. Handsontable menus
   // must render inside it so Radix's `inert`/pointer-events restriction doesn't
   // block clicks on menu items that would otherwise land in document.body.
@@ -933,15 +934,48 @@ const HandsontableWorkbook = React.forwardRef<
     onChange,
   });
 
+  const debouncedEmitWorkbookToParent = React.useCallback(() => {
+    if (debouncedEmitTimerRef.current) {
+      clearTimeout(debouncedEmitTimerRef.current);
+    }
+    debouncedEmitTimerRef.current = setTimeout(() => {
+      debouncedEmitTimerRef.current = null;
+      emitWorkbookToParent();
+    }, 300);
+  }, [emitWorkbookToParent]);
+
+  const flushDebouncedEmitWorkbookToParent = React.useCallback(() => {
+    if (debouncedEmitTimerRef.current) {
+      clearTimeout(debouncedEmitTimerRef.current);
+      debouncedEmitTimerRef.current = null;
+    }
+    emitWorkbookToParent();
+  }, [emitWorkbookToParent]);
+
+  const scheduleSelectionLabelUpdate = React.useCallback((label: string) => {
+    selectionLabelRef.current = label;
+    if (debouncedSelectionLabelTimerRef.current) {
+      clearTimeout(debouncedSelectionLabelTimerRef.current);
+    }
+    debouncedSelectionLabelTimerRef.current = setTimeout(() => {
+      debouncedSelectionLabelTimerRef.current = null;
+      setSelectionLabel(selectionLabelRef.current);
+    }, 50);
+  }, []);
+
   React.useEffect(() => {
     if (readOnly) return;
     const onBeforeUnload = () => {
       collectCurrentSheetFromHot(true);
-      emitWorkbookToParent();
+      flushDebouncedEmitWorkbookToParent();
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
+  }, [
+    readOnly,
+    collectCurrentSheetFromHot,
+    flushDebouncedEmitWorkbookToParent,
+  ]);
 
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => {
@@ -1064,7 +1098,6 @@ const HandsontableWorkbook = React.forwardRef<
       }
       formulaCellSetRef.current = formulaSet;
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
-      setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
       if (!readOnly) {
         const scopedMeta = getSheetCellMetaList(sheet.name || `Sheet${targetIndex + 1}`);
@@ -1132,7 +1165,7 @@ const HandsontableWorkbook = React.forwardRef<
       );
       lastSelectionRef.current = nextRange;
       sheetSelectionRef.current[targetIndex] = nextRange;
-      setSelectionLabel(toRangeLabel(nextRange));
+      scheduleSelectionLabelUpdate(toRangeLabel(nextRange));
       if (typeof hot.refreshDimensions === "function") {
         hot.refreshDimensions();
       }
@@ -1177,6 +1210,7 @@ const HandsontableWorkbook = React.forwardRef<
       toVisibleGrid,
       normalizeLegacyCheckboxValues,
       getSheetCellMetaList,
+      scheduleSelectionLabelUpdate,
     ],
   );
 
@@ -1185,14 +1219,13 @@ const HandsontableWorkbook = React.forwardRef<
     preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
       collectCurrentSheetFromHot(true, activeSheetIndex);
-      emitWorkbookToParent();
+      flushDebouncedEmitWorkbookToParent();
     }
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
-    setInitialGrid(toVisibleGrid(workbookRef.current.sheets[targetIndex]));
     const saved = sheetSelectionRef.current[targetIndex];
     if (saved) lastSelectionRef.current = saved;
-    setSelectionLabel(toRangeLabel(lastSelectionRef.current));
+    scheduleSelectionLabelUpdate(toRangeLabel(lastSelectionRef.current));
     setActiveSheetIndex(targetIndex);
   };
 
@@ -1232,6 +1265,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (typeof hot.batch === "function") hot.batch(apply);
       else apply();
       collectCurrentSheetFromHot(true);
+      debouncedEmitWorkbookToParent();
       restoreHotRange(hot, range);
     },
     [
@@ -1239,6 +1273,7 @@ const HandsontableWorkbook = React.forwardRef<
       getToolbarActionRange,
       readOnly,
       collectCurrentSheetFromHot,
+      debouncedEmitWorkbookToParent,
       setCellMeta,
     ],
   );
@@ -1306,6 +1341,12 @@ const HandsontableWorkbook = React.forwardRef<
     () => () => {
       flushPendingColorTimers();
       flushReadOnlyEmitDebounce();
+      if (debouncedEmitTimerRef.current) {
+        clearTimeout(debouncedEmitTimerRef.current);
+      }
+      if (debouncedSelectionLabelTimerRef.current) {
+        clearTimeout(debouncedSelectionLabelTimerRef.current);
+      }
       if (previewEditingSettleTimerRef.current) {
         clearTimeout(previewEditingSettleTimerRef.current);
       }
@@ -1400,6 +1441,7 @@ const HandsontableWorkbook = React.forwardRef<
     if (typeof hot.batch === "function") hot.batch(apply);
     else apply();
     collectCurrentSheetFromHot(true);
+    debouncedEmitWorkbookToParent();
     restoreHotRange(hot, range);
   };
 
@@ -1522,6 +1564,7 @@ const HandsontableWorkbook = React.forwardRef<
         }
       });
     });
+    debouncedEmitWorkbookToParent();
   };
 
   // ─── undo / redo ────────────────────────────────────────────────────────────
@@ -1634,6 +1677,7 @@ const HandsontableWorkbook = React.forwardRef<
     }
 
     collectCurrentSheetFromHot(true);
+    debouncedEmitWorkbookToParent();
     scheduleUndoRedoRefresh();
     hot.render();
     restoreHotRange(hot, range);
@@ -1652,6 +1696,7 @@ const HandsontableWorkbook = React.forwardRef<
     if (!plugin) return;
     plugin.merge(range.startRow, range.startCol, range.endRow, range.endCol);
     collectCurrentSheetFromHot(true);
+    debouncedEmitWorkbookToParent();
     restoreHotRange(hot, range);
   };
 
@@ -1664,6 +1709,7 @@ const HandsontableWorkbook = React.forwardRef<
     if (!plugin) return;
     plugin.unmerge(range.startRow, range.startCol, range.endRow, range.endCol);
     collectCurrentSheetFromHot(true);
+    debouncedEmitWorkbookToParent();
     restoreHotRange(hot, range);
   };
 
@@ -1702,6 +1748,7 @@ const HandsontableWorkbook = React.forwardRef<
         range.endCol - range.startCol + 1,
       );
     collectCurrentSheetFromHot(true);
+    debouncedEmitWorkbookToParent();
     refreshUndoRedoState();
     restoreHotRange(hot, range);
   };
@@ -1794,7 +1841,6 @@ const HandsontableWorkbook = React.forwardRef<
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
-    setInitialGrid(toVisibleGrid(nextSheets[nextSheets.length - 1]));
     setActiveSheetIndex(nextSheets.length - 1);
   };
 
@@ -1808,7 +1854,6 @@ const HandsontableWorkbook = React.forwardRef<
     next.splice(target, 0, moved);
     workbookRef.current.sheets = next;
     setSheetTabs(next.map((s) => ({ name: s.name, tabColor: s.tabColor })));
-    setInitialGrid(toVisibleGrid(next[target]));
     setActiveSheetIndex(target);
   };
 
@@ -1858,12 +1903,6 @@ const HandsontableWorkbook = React.forwardRef<
     // reset the tab and briefly bind sheet 0's grid to the wrong context.
     if (sheetCountChanged) {
       setActiveSheetIndex(0);
-      const first = nextSheets[0]?.grid?.length ? nextSheets[0].grid : [[""]];
-      if (!readOnly) {
-        setInitialGrid(cloneEditableGrid(first));
-      } else {
-        setInitialGrid(cloneEditableGrid(first));
-      }
     } else {
       setActiveSheetIndex((prev) =>
         Math.min(prev, Math.max(0, nextSheets.length - 1)),
@@ -1875,6 +1914,10 @@ const HandsontableWorkbook = React.forwardRef<
 
   const hotTableMountKey = React.useMemo(
     () => hotTableMountSignature(normalizedIncomingSheets),
+    [normalizedIncomingSheets],
+  );
+  const sheetStructureKey = React.useMemo(
+    () => normalizedIncomingSheets.map((sheet) => sheet.name || "").join("|"),
     [normalizedIncomingSheets],
   );
 
@@ -1906,7 +1949,7 @@ const HandsontableWorkbook = React.forwardRef<
       hfRef.current?.destroy();
       hfRef.current = null;
     };
-  }, [incomingWorkbookKey, initializeHyperFormula, refreshFormulaDisplays]);
+  }, [sheetStructureKey, initializeHyperFormula, refreshFormulaDisplays]);
 
   // ─── cell renderer ───────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -1917,9 +1960,6 @@ const HandsontableWorkbook = React.forwardRef<
     fillableCellSet,
     imageMap,
     readOnly,
-    renderedColWidths,
-    renderedRowHeights,
-    renderedMergeCells,
   ]);
 
   const cellsCallback = React.useCallback(
@@ -2495,7 +2535,7 @@ const HandsontableWorkbook = React.forwardRef<
       };
       lastSelectionRef.current = range;
       sheetSelectionRef.current[activeSheetIndexRef.current] = range;
-      if (!readOnly) setSelectionLabel(toRangeLabel(range));
+      if (!readOnly) scheduleSelectionLabelUpdate(toRangeLabel(range));
     },
     [readOnly, safeGrid],
   );
@@ -2551,7 +2591,7 @@ const HandsontableWorkbook = React.forwardRef<
         // updated above (and in afterSelection).
         return;
       }
-      setSelectionLabel(toRangeLabel(range));
+      scheduleSelectionLabelUpdate(toRangeLabel(range));
       syncToolbarFromCell(hot, range.startRow, range.startCol);
     },
     [readOnly, safeGrid, syncToolbarFromCell],
@@ -2596,7 +2636,6 @@ const HandsontableWorkbook = React.forwardRef<
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
   const hotTableSettings = React.useMemo(
     () => ({
-      data: initialGrid,
       rowHeaders: true,
       colHeaders: true,
       selectionMode: "multiple" as const,
@@ -2612,9 +2651,12 @@ const HandsontableWorkbook = React.forwardRef<
       trimWhitespace: false,
       stretchH: (stretchColumnsInPreview ? "all" : "none") as "all" | "none",
       height: readOnly ? (readOnlyHotHeight ?? 380) : 320,
-      // In preview (readOnly), fully materialize all rows instead of viewport virtualization.
-      renderAllRows: readOnly,
-      viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
+      renderAllRows: false,
+      viewportRowRenderingOffset: readOnly
+        ? 15
+        : lightweightPerformance
+          ? 8
+          : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
       formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
       mergeCells:
@@ -2721,7 +2763,6 @@ const HandsontableWorkbook = React.forwardRef<
       afterRemoveCol,
     }),
     [
-      initialGrid,
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
@@ -3244,9 +3285,6 @@ const HandsontableWorkbook = React.forwardRef<
                       tabColor: s.tabColor,
                     })),
                   );
-                  setInitialGrid(
-                    toVisibleGrid(nextSheets[nextSheets.length - 1]),
-                  );
                   setActiveSheetIndex(nextSheets.length - 1);
                 }}
               >
@@ -3316,11 +3354,10 @@ const HandsontableWorkbook = React.forwardRef<
         )}
         <div style={hotTableScaleStyle}>
           <HotTable
-            /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
-             * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
-             * leak onto another at the same coordinates. */
-            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            /* New instance only when workbook structure changes. */
+            key={`ht-wb-${hotTableMountKey}`}
             ref={hotRef}
+            data={stableEmptyGridRef.current}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}
             manualRowResize={!readOnly && !lightweightPerformance}
