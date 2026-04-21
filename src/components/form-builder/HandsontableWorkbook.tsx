@@ -2347,8 +2347,16 @@ const HandsontableWorkbook = React.forwardRef<
   }, [scheduleUndoRedoRefresh]);
 
   const handleCellChanges = React.useCallback(
-    (changes: [number, number, unknown, unknown][]) => {
-      const sheetIndex = activeSheetIndexRef.current;
+    (
+      changes: [number, number, unknown, unknown][],
+      _source?: string,
+      sheetIndexOverride?: number,
+    ) => {
+      const sheetIndex =
+        Number.isInteger(sheetIndexOverride) &&
+        (sheetIndexOverride as number) >= 0
+          ? (sheetIndexOverride as number)
+          : activeSheetIndexRef.current;
       const sheet = workbookRef.current.sheets[sheetIndex];
       const hf = hfRef.current;
       if (!sheet || !hf || !Array.isArray(changes)) return;

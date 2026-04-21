@@ -30,10 +30,12 @@ export const useWorkbookHotCallbacks = ({
   onCellChanges?: (
     changes: [number, number, unknown, unknown][],
     source: string,
+    sheetIndex: number,
   ) => void;
 }) => {
   const afterChange = React.useCallback(
     (changes: any, source: string) => {
+      const changeSheetIndex = activeSheetIndexRef.current;
       setTimeout(() => {
         if (source === "loadData") return;
         const hot = hotRef.current?.hotInstance;
@@ -48,6 +50,7 @@ export const useWorkbookHotCallbacks = ({
           onCellChanges?.(
             changes as [number, number, unknown, unknown][],
             source,
+            changeSheetIndex,
           );
           if (hot) {
             const oppositeCellByKey = yesNoOppositeCellMapRef.current;
