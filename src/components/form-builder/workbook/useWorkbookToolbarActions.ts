@@ -23,6 +23,7 @@ export const useWorkbookToolbarActions = ({
   collectCurrentSheetFromHot,
   scheduleUndoRedoRefresh,
   restoreHotRange,
+  setScopedCellMeta,
 }: {
   hotRef: React.MutableRefObject<any>;
   readOnly: boolean;
@@ -33,6 +34,12 @@ export const useWorkbookToolbarActions = ({
   collectCurrentSheetFromHot: (includeMeta: boolean, sheetIndex?: number) => void;
   scheduleUndoRedoRefresh: () => void;
   restoreHotRange: (hot: any, range: Range | null) => void;
+  setScopedCellMeta: (
+    sheetName: string,
+    row: number,
+    col: number,
+    props: Record<string, unknown>,
+  ) => void;
 }) => {
   const applyCheckboxMetaToSelection = React.useCallback(
     (
@@ -48,6 +55,9 @@ export const useWorkbookToolbarActions = ({
       const pairEpoch = Date.now();
 
       const apply = () => {
+        const idx = activeSheetIndexRef.current;
+        const sheetName =
+          workbookRef.current.sheets[idx]?.name || `Sheet${idx + 1}`;
         if (options.kind === "yesno") {
           for (let r = range.startRow; r <= range.endRow; r++) {
             const leftCol = range.startCol;
@@ -71,6 +81,12 @@ export const useWorkbookToolbarActions = ({
               hot.setCellMeta(rowIndex, colIndex, "type", "checkbox");
               hot.setCellMeta(rowIndex, colIndex, "checkedTemplate", options.checkedTemplate);
               hot.setCellMeta(rowIndex, colIndex, "uncheckedTemplate", options.uncheckedTemplate);
+              setScopedCellMeta(sheetName, rowIndex, colIndex, {
+                className: currentTokens.join(" "),
+                type: "checkbox",
+                checkedTemplate: options.checkedTemplate,
+                uncheckedTemplate: options.uncheckedTemplate,
+              });
             }
           }
           return;
@@ -87,6 +103,12 @@ export const useWorkbookToolbarActions = ({
             hot.setCellMeta(r, c, "type", "checkbox");
             hot.setCellMeta(r, c, "checkedTemplate", options.checkedTemplate);
             hot.setCellMeta(r, c, "uncheckedTemplate", options.uncheckedTemplate);
+            setScopedCellMeta(sheetName, r, c, {
+              className: currentTokens.join(" "),
+              type: "checkbox",
+              checkedTemplate: options.checkedTemplate,
+              uncheckedTemplate: options.uncheckedTemplate,
+            });
           }
         }
       };
@@ -110,6 +132,7 @@ export const useWorkbookToolbarActions = ({
       readOnly,
       restoreHotRange,
       scheduleUndoRedoRefresh,
+      setScopedCellMeta,
       workbookRef,
       yesNoOppositeCellMapRef,
     ],

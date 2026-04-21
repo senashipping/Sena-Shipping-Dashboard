@@ -347,6 +347,9 @@ const HandsontableWorkbook = React.forwardRef<
   const yesNoOppositeCellMapRef = React.useRef<
     Map<string, { row: number; col: number }>
   >(new Map());
+  const cellMetaRef = React.useRef<
+    Record<string, Record<number, Record<number, CellMetaEntry>>>
+  >({});
   const suppressNextHotReloadRef = React.useRef(false);
   const pendingIncomingReloadRef = React.useRef(false);
   const pendingIncomingReloadSheetIndexRef = React.useRef<number | null>(null);
@@ -398,6 +401,67 @@ const HandsontableWorkbook = React.forwardRef<
   const activeSheet =
     safeSheets[Math.min(activeSheetIndex, safeSheets.length - 1)] ||
     safeSheets[0];
+  const activeSheetName = activeSheet?.name || `Sheet${activeSheetIndex + 1}`;
+
+  const getCellMeta = React.useCallback(
+    (sheetName: string, row: number, col: number): Partial<CellMetaEntry> => {
+      return cellMetaRef.current[sheetName]?.[row]?.[col] ?? {};
+    },
+    [],
+  );
+
+  const setCellMeta = React.useCallback(
+    (
+      sheetName: string,
+      row: number,
+      col: number,
+      props: Partial<CellMetaEntry>,
+    ) => {
+      if (!cellMetaRef.current[sheetName]) cellMetaRef.current[sheetName] = {};
+      if (!cellMetaRef.current[sheetName][row])
+        cellMetaRef.current[sheetName][row] = {};
+      const prev = cellMetaRef.current[sheetName][row][col];
+      cellMetaRef.current[sheetName][row][col] = {
+        ...(prev || { row, col }),
+        ...props,
+        row,
+        col,
+      } as CellMetaEntry;
+    },
+    [],
+  );
+
+  const setSheetCellMetaFromList = React.useCallback(
+    (sheetName: string, list: NonNullable<SheetData["cellMeta"]>) => {
+      const byRow: Record<number, Record<number, CellMetaEntry>> = {};
+      for (const meta of list || []) {
+        if (!meta || !Number.isFinite(+meta.row) || !Number.isFinite(+meta.col))
+          continue;
+        const row = +meta.row;
+        const col = +meta.col;
+        if (!byRow[row]) byRow[row] = {};
+        byRow[row][col] = { ...meta, row, col };
+      }
+      cellMetaRef.current[sheetName] = byRow;
+    },
+    [],
+  );
+
+  const getSheetCellMetaList = React.useCallback(
+    (sheetName: string): NonNullable<SheetData["cellMeta"]> => {
+      const byRow = cellMetaRef.current[sheetName] || {};
+      const out: NonNullable<SheetData["cellMeta"]> = [];
+      for (const rowKey of Object.keys(byRow)) {
+        const rowMeta = byRow[+rowKey] || {};
+        for (const colKey of Object.keys(rowMeta)) {
+          const meta = rowMeta[+colKey];
+          if (meta) out.push({ ...meta, row: +meta.row, col: +meta.col });
+        }
+      }
+      return dedupeCellMetaByCoordinate(out);
+    },
+    [],
+  );
   const safeGrid =
     Array.isArray(activeSheet?.grid) && activeSheet.grid.length > 0
       ? activeSheet.grid
@@ -540,10 +604,10 @@ const HandsontableWorkbook = React.forwardRef<
 
   const persistedCellMetaMap = React.useMemo(() => {
     const map = new Map<string, NonNullable<SheetData["cellMeta"]>[number]>();
-    for (const meta of activeSheet?.cellMeta || [])
+    for (const meta of getSheetCellMetaList(activeSheetName))
       map.set(cellCoordKey(+meta.row, +meta.col), meta);
     return map;
-  }, [activeSheet]);
+  }, [activeSheetName, getSheetCellMetaList]);
 
   const fillableCellSet = React.useMemo(() => {
     const set = new Set<string>();
@@ -772,109 +836,17 @@ const HandsontableWorkbook = React.forwardRef<
             colspan: cell.colspan,
           })) || [];
 
-      let cellMeta = workbookRef.current.sheets[idx]?.cellMeta || [];
+      const targetSheet =
+        workbookRef.current.sheets[idx] || ({ name: `Sheet${idx + 1}` } as SheetData);
+      const targetSheetName = targetSheet.name || `Sheet${idx + 1}`;
+      let cellMeta = getSheetCellMetaList(targetSheetName);
       if (includeMeta) {
-        // HOT's getCellsMeta() only returns *lazy-initialized* meta objects. Replacing the
-        // full persisted `cellMeta` with that list drops formatting for cells the table has
-        // never touched (e.g. other fillable highlights after marking a new region).
-        const metaByKey = new Map<string, CellMetaEntry>();
-        for (const m of cellMeta) {
-          if (!m || !Number.isFinite(+m.row) || !Number.isFinite(+m.col))
-            continue;
-          metaByKey.set(cellCoordKey(+m.row, +m.col), {
-            ...m,
-            row: +m.row,
-            col: +m.col,
-          });
-        }
-
-        const cellsMeta =
-          typeof hot.getCellsMeta === "function" ? hot.getCellsMeta() : [];
-        for (const meta of cellsMeta || []) {
-          if (
-            typeof meta?.row !== "number" ||
-            typeof meta?.col !== "number" ||
-            meta.row < 0 ||
-            meta.col < 0
-          )
-            continue;
-
-          const useful =
-            Boolean(meta?.className) ||
-            Boolean(meta?.type) ||
-            meta?.checkedTemplate !== undefined ||
-            meta?.uncheckedTemplate !== undefined ||
-            Boolean(meta?.dateFormat) ||
-            typeof meta?.correctFormat === "boolean" ||
-            Boolean(meta?.numericFormat) ||
-            Array.isArray(meta?.source) ||
-            typeof meta?.strict === "boolean";
-          if (!useful) continue;
-
-          const key = cellCoordKey(meta.row, meta.col);
-          const existing = metaByKey.get(key);
-
-          // Preserve persisted class tokens (e.g. `meta-fillable`) when HOT's
-          // lazily initialized meta for this cell has no className.
-          const existingTokens = String(existing?.className || "")
-            .split(/\s+/)
-            .filter(Boolean);
-          const hotTokens = String(meta?.className || "")
-            .split(/\s+/)
-            .filter(Boolean);
-          const mergedTokens = new Set([...hotTokens]);
-          for (const t of existingTokens) {
-            if (!mergedTokens.has(t)) mergedTokens.add(t);
-          }
-          const mergedClassName =
-            [...mergedTokens].join(" ").trim() || undefined;
-
-          metaByKey.set(key, {
-            row: meta.row,
-            col: meta.col,
-            formula: existing?.formula,
-            formulaCachedValue: existing?.formulaCachedValue,
-            className: mergedClassName,
-            type: meta.type ? String(meta.type) : existing?.type,
-            checkedTemplate:
-              meta.checkedTemplate !== undefined
-                ? String(meta.checkedTemplate)
-                : existing?.checkedTemplate,
-            uncheckedTemplate:
-              meta.uncheckedTemplate !== undefined
-                ? String(meta.uncheckedTemplate)
-                : existing?.uncheckedTemplate,
-            dateFormat: meta.dateFormat
-              ? String(meta.dateFormat)
-              : existing?.dateFormat,
-            correctFormat:
-              typeof meta.correctFormat === "boolean"
-                ? meta.correctFormat
-                : existing?.correctFormat,
-            numericFormat:
-              meta.numericFormat && typeof meta.numericFormat === "object"
-                ? {
-                    pattern:
-                      typeof meta.numericFormat.pattern === "string"
-                        ? meta.numericFormat.pattern
-                        : existing?.numericFormat?.pattern,
-                    culture:
-                      typeof meta.numericFormat.culture === "string"
-                        ? meta.numericFormat.culture
-                        : existing?.numericFormat?.culture,
-                  }
-                : existing?.numericFormat,
-            source: Array.isArray(meta.source)
-              ? meta.source.map(String)
-              : existing?.source,
-            strict:
-              typeof meta.strict === "boolean" ? meta.strict : existing?.strict,
-          });
-        }
-        cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
+        // Keep metadata isolated in our per-sheet ref; avoid reading HOT's global
+        // meta store which is keyed only by row/col and can bleed across sheets.
+        cellMeta = getSheetCellMetaList(targetSheetName);
       }
 
-      const current = workbookRef.current.sheets[idx] || {
+      const current = targetSheet || {
         name: `Sheet${idx + 1}`,
         grid: [[""]],
       };
@@ -936,8 +908,9 @@ const HandsontableWorkbook = React.forwardRef<
         colWidthsPx,
         rowHeightsPx,
       };
+      setSheetCellMetaFromList(targetSheetName, cellMeta);
     },
-    [readOnly],
+    [readOnly, getSheetCellMetaList, setSheetCellMetaFromList],
   );
 
   React.useImperativeHandle(
@@ -1094,7 +1067,8 @@ const HandsontableWorkbook = React.forwardRef<
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
       if (!readOnly) {
-        for (const meta of dedupeCellMetaByCoordinate(sheet.cellMeta || [])) {
+        const scopedMeta = getSheetCellMetaList(sheet.name || `Sheet${targetIndex + 1}`);
+        for (const meta of scopedMeta) {
           if (meta.className)
             hot.setCellMeta(meta.row, meta.col, "className", meta.className);
           if (meta.type) hot.setCellMeta(meta.row, meta.col, "type", meta.type);
@@ -1202,6 +1176,7 @@ const HandsontableWorkbook = React.forwardRef<
       readOnly,
       toVisibleGrid,
       normalizeLegacyCheckboxValues,
+      getSheetCellMetaList,
     ],
   );
 
@@ -1247,6 +1222,9 @@ const HandsontableWorkbook = React.forwardRef<
                   classToken,
                 ];
             hot.setCellMeta(r, c, "className", next.join(" ").trim());
+            setCellMeta(activeSheetName, r, c, {
+              className: next.join(" ").trim() || undefined,
+            });
           }
         }
       };
@@ -1256,7 +1234,13 @@ const HandsontableWorkbook = React.forwardRef<
       collectCurrentSheetFromHot(true);
       restoreHotRange(hot, range);
     },
-    [getToolbarActionRange, readOnly, collectCurrentSheetFromHot],
+    [
+      activeSheetName,
+      getToolbarActionRange,
+      readOnly,
+      collectCurrentSheetFromHot,
+      setCellMeta,
+    ],
   );
 
   const setFontStyle = (style: "bold" | "italic" | "underline" | "strike") => {
@@ -1375,6 +1359,11 @@ const HandsontableWorkbook = React.forwardRef<
             hot.setCellMeta(r, c, "type", "date");
             hot.setCellMeta(r, c, "dateFormat", "YYYY-MM-DD");
             hot.setCellMeta(r, c, "correctFormat", true);
+            setCellMeta(activeSheetName, r, c, {
+              type: "date",
+              dateFormat: "YYYY-MM-DD",
+              correctFormat: true,
+            });
             if (raw != null && raw !== "") {
               const d = new Date(raw);
               if (!isNaN(d.getTime()))
@@ -1392,6 +1381,10 @@ const HandsontableWorkbook = React.forwardRef<
           hot.setCellMeta(r, c, "numericFormat", {
             pattern: patterns[kind],
             culture: "en-US",
+          });
+          setCellMeta(activeSheetName, r, c, {
+            type: "numeric",
+            numericFormat: { pattern: patterns[kind], culture: "en-US" },
           });
 
           if (raw != null && raw !== "") {
@@ -1422,6 +1415,8 @@ const HandsontableWorkbook = React.forwardRef<
     collectCurrentSheetFromHot,
     scheduleUndoRedoRefresh,
     restoreHotRange,
+    setScopedCellMeta: (sheetName, row, col, props) =>
+      setCellMeta(sheetName, row, col, props as Partial<CellMetaEntry>),
   });
 
   const toggleFillableSelection = () => {
@@ -1447,6 +1442,7 @@ const HandsontableWorkbook = React.forwardRef<
 
     const sheet = workbookRef.current.sheets[idx];
     if (!sheet) return;
+    const sheetName = sheet.name || `Sheet${idx + 1}`;
 
     const metaByKey = new Map<
       string,
@@ -1485,6 +1481,7 @@ const HandsontableWorkbook = React.forwardRef<
         const newClassName = tokens.join(" ").trim();
 
         hot.setCellMeta(r, c, "className", newClassName);
+        setCellMeta(sheetName, r, c, { className: newClassName || undefined });
 
         metaByKey.set(key, {
           ...(current || { row: r, col: c }),
@@ -1496,6 +1493,7 @@ const HandsontableWorkbook = React.forwardRef<
     }
 
     sheet.cellMeta = dedupeCellMetaByCoordinate(Array.from(metaByKey.values()));
+    setSheetCellMetaFromList(sheetName, sheet.cellMeta);
     workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
 
     lastIncomingSignatureRef.current = workbookSignature(
@@ -1611,10 +1609,12 @@ const HandsontableWorkbook = React.forwardRef<
     //    meta-checkbox, YES/NO pair tokens, etc. from the old stored record.
     const idx = activeSheetIndexRef.current;
     const sheet = workbookRef.current.sheets[idx];
+    const sheetName = sheet?.name || `Sheet${idx + 1}`;
     if (sheet?.cellMeta) {
       sheet.cellMeta = sheet.cellMeta.filter(
         (m) => !clearKeys.has(cellCoordKey(+m.row, +m.col)),
       );
+      setSheetCellMetaFromList(sheetName, sheet.cellMeta);
     }
     for (const key of clearKeys) {
       formulaCellSetRef.current.delete(key);
@@ -1790,6 +1790,7 @@ const HandsontableWorkbook = React.forwardRef<
     cloned.name = `${source.name} Copy`;
     const nextSheets = [...workbookRef.current.sheets, cloned];
     workbookRef.current.sheets = nextSheets;
+    setSheetCellMetaFromList(cloned.name || `Sheet${nextSheets.length}`, cloned.cellMeta || []);
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1845,6 +1846,9 @@ const HandsontableWorkbook = React.forwardRef<
         mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
       ),
     };
+    for (const s of workbookRef.current.sheets) {
+      setSheetCellMetaFromList(s.name || "Sheet", s.cellMeta || []);
+    }
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1948,7 +1952,9 @@ const HandsontableWorkbook = React.forwardRef<
         cellsCacheRef.current.set(cacheKey, {});
         return {};
       }
-      const persistedMeta = persistedCellMetaMap.get(cacheKey);
+      const persistedMeta =
+        persistedCellMetaMap.get(cacheKey) ||
+        (getCellMeta(activeSheetName, row, col) as CellMetaEntry | undefined);
       const cp: any = {};
       const persistedClassName = String(persistedMeta?.className || "");
       const classTokens = persistedClassName.split(" ").filter(Boolean);
@@ -2158,6 +2164,8 @@ const HandsontableWorkbook = React.forwardRef<
     },
     [
       persistedCellMetaMap,
+      activeSheetName,
+      getCellMeta,
       fillableCellSet,
       imageMap,
       readOnly,
