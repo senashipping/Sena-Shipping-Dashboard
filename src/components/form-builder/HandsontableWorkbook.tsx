@@ -1535,7 +1535,6 @@ const HandsontableWorkbook = React.forwardRef<
     lastIncomingSignatureRef.current = workbookSignature(workbookRef.current.sheets);
     hot.render();
     restoreHotRange(hot, range);
-    collectCurrentSheetFromHot(true, idx);
   };
 
   // ─── undo / redo ────────────────────────────────────────────────────────────
