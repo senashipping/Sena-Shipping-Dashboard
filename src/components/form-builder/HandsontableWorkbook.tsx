@@ -43,7 +43,6 @@ export type {
 export { MAX_PREVIEW_COLS, MAX_PREVIEW_ROWS } from "./workbook/workbookTypes";
 
 registerAllModules();
-const FORMULAS_CONFIG = { engine: HyperFormula };
 const FORMULA_PREFIX = "=";
 
 /** Handsontable text editor — duck-typed (avoid importing private editor class). */
@@ -869,10 +868,16 @@ const HandsontableWorkbook = React.forwardRef<
         ({ name: `Sheet${idx + 1}` } as SheetData);
       const targetSheetName = targetSheet.name || `Sheet${idx + 1}`;
       let cellMeta = getSheetCellMetaList(targetSheetName);
+      if ((!cellMeta || cellMeta.length === 0) && Array.isArray(targetSheet.cellMeta)) {
+        cellMeta = dedupeCellMetaByCoordinate(targetSheet.cellMeta);
+      }
       if (includeMeta) {
         // Keep metadata isolated in our per-sheet ref; avoid reading HOT's global
         // meta store which is keyed only by row/col and can bleed across sheets.
         cellMeta = getSheetCellMetaList(targetSheetName);
+        if ((!cellMeta || cellMeta.length === 0) && Array.isArray(targetSheet.cellMeta)) {
+          cellMeta = dedupeCellMetaByCoordinate(targetSheet.cellMeta);
+        }
       }
       for (const meta of cellMeta || []) {
         const formula = (meta as any)?.formula;
@@ -2436,6 +2441,7 @@ const HandsontableWorkbook = React.forwardRef<
         (hf as any).rebuildAndRecalculate();
       }
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
+      setSheetCellMetaFromList(sheet.name || `Sheet${sheetIndex + 1}`, sheet.cellMeta);
       const updatesBySheet = refreshFormulaDisplays();
       const visibleSheetIndex = activeSheetIndexRef.current;
       const activeUpdates = updatesBySheet.get(visibleSheetIndex) || [];
@@ -2696,7 +2702,10 @@ const HandsontableWorkbook = React.forwardRef<
       renderAllRows: readOnly,
       viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
-      formulas: shouldUseFormulaEngine ? FORMULAS_CONFIG : undefined,
+      // We run a workbook-wide HyperFormula instance manually for cross-sheet
+      // references. Enabling HOT's per-grid formulas plugin here causes
+      // cross-sheet refs (e.g. 'CREW LIST'!C4) to resolve as #REF!.
+      formulas: undefined,
       mergeCells:
         renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
       filters: heavyPluginsEnabled,
