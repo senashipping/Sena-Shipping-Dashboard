@@ -604,10 +604,15 @@ const HandsontableWorkbook = React.forwardRef<
 
   const persistedCellMetaMap = React.useMemo(() => {
     const map = new Map<string, NonNullable<SheetData["cellMeta"]>[number]>();
-    for (const meta of getSheetCellMetaList(activeSheetName))
+    const scopedMeta = getSheetCellMetaList(activeSheetName);
+    const sourceMeta =
+      scopedMeta.length > 0
+        ? scopedMeta
+        : dedupeCellMetaByCoordinate(activeSheet?.cellMeta || []);
+    for (const meta of sourceMeta)
       map.set(cellCoordKey(+meta.row, +meta.col), meta);
     return map;
-  }, [activeSheetName, getSheetCellMetaList]);
+  }, [activeSheetName, activeSheet?.cellMeta, getSheetCellMetaList, incomingWorkbookKey]);
 
   const fillableCellSet = React.useMemo(() => {
     const set = new Set<string>();
