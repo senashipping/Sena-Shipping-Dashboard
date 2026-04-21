@@ -1489,6 +1489,55 @@ const HandsontableWorkbook = React.forwardRef<
     });
   };
 
+  const clearFillableSelection = () => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot || readOnly) return;
+
+    const idx = activeSheetIndexRef.current;
+    collectCurrentSheetFromHot(true, idx);
+
+    const range = getToolbarActionRange(hot);
+    if (!range) return;
+
+    const sheet = workbookRef.current.sheets[idx];
+    if (!sheet) return;
+
+    const metaByKey = new Map<
+      string,
+      NonNullable<SheetData["cellMeta"]>[number]
+    >();
+    for (const meta of sheet.cellMeta || []) {
+      metaByKey.set(`${meta.row}:${meta.col}`, meta);
+    }
+
+    for (let r = range.startRow; r <= range.endRow; r++) {
+      for (let c = range.startCol; c <= range.endCol; c++) {
+        const key = `${r}:${c}`;
+        const current = metaByKey.get(key);
+        if (!current) continue;
+        const tokens = String(current.className || "")
+          .split(" ")
+          .filter(Boolean)
+          .filter((token) => token !== "meta-fillable");
+        const newClassName = tokens.join(" ").trim();
+
+        hot.setCellMeta(r, c, "className", newClassName);
+        metaByKey.set(key, {
+          ...current,
+          className: newClassName || undefined,
+        });
+      }
+    }
+
+    sheet.cellMeta = dedupeCellMetaByCoordinate(Array.from(metaByKey.values()));
+    workbookRef.current.sheets[idx] = deepCloneSheet(sheet);
+
+    lastIncomingSignatureRef.current = workbookSignature(workbookRef.current.sheets);
+    hot.render();
+    restoreHotRange(hot, range);
+    collectCurrentSheetFromHot(true, idx);
+  };
+
   // ─── undo / redo ────────────────────────────────────────────────────────────
 
   const undoAction = () => {
@@ -3207,6 +3256,12 @@ const HandsontableWorkbook = React.forwardRef<
               title="Mark selected cells as fillable in Preview/runtime mode"
             >
               ✏ Fillable
+            </TB>
+            <TB
+              onClick={clearFillableSelection}
+              title="Mark selected cells as not fillable in Preview/runtime mode"
+            >
+              🚫 Not Fillable
             </TB>
           </div>
         )}
