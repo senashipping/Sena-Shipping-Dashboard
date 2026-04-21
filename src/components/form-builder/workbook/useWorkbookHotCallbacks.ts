@@ -81,7 +81,7 @@ export const useWorkbookHotCallbacks = ({
           scheduleUndoRedoRefresh();
         }
         if (readOnly && changes && source !== "updateData") {
-          const idx = activeSheetIndexRef.current;
+          const idx = changeSheetIndex;
           const sheet = workbookRef.current.sheets[idx];
           if (!sheet) return;
           const baseGrid = sheet.grid;

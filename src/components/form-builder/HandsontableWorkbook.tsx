@@ -678,6 +678,10 @@ const HandsontableWorkbook = React.forwardRef<
     const byName: Record<string, (string | number | boolean)[][]> = {};
     for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
       const sheet = sheets[sIdx];
+      const metaByKey = new Map<string, CellMetaEntry>();
+      for (const m of sheet.cellMeta || []) {
+        metaByKey.set(cellCoordKey(m.row, m.col), { ...m });
+      }
       const rows = Math.max(sheet.grid?.length || 1, 1);
       const cols = Math.max(
         1,
@@ -695,11 +699,27 @@ const HandsontableWorkbook = React.forwardRef<
               return formula;
             }
             const raw = sheet.grid?.[row]?.[col] ?? "";
+            if (
+              typeof raw === "string" &&
+              raw.startsWith(FORMULA_PREFIX) &&
+              raw.length > 1
+            ) {
+              const key = cellCoordKey(row, col);
+              const current =
+                metaByKey.get(key) || ({ row, col } as CellMetaEntry);
+              current.formula = raw;
+              if (typeof current.formulaCachedValue !== "string") {
+                current.formulaCachedValue = "";
+              }
+              metaByKey.set(key, current);
+              return raw;
+            }
             const num = Number(raw);
             if (String(raw).trim() !== "" && Number.isFinite(num)) return num;
             return String(raw);
           }),
       );
+      sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
     }
     hfRef.current = HyperFormula.buildFromSheets(byName, {
       licenseKey: "gpl-v3",
@@ -2390,7 +2410,8 @@ const HandsontableWorkbook = React.forwardRef<
       }
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       const updatesBySheet = refreshFormulaDisplays();
-      const activeUpdates = updatesBySheet.get(sheetIndex) || [];
+      const visibleSheetIndex = activeSheetIndexRef.current;
+      const activeUpdates = updatesBySheet.get(visibleSheetIndex) || [];
       const hot = hotRef.current?.hotInstance;
       if (hot && activeUpdates.length > 0) {
         hot.setDataAtCell(activeUpdates, "formulaSync");
