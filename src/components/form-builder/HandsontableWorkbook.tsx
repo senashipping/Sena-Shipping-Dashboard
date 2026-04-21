@@ -712,9 +712,6 @@ const HandsontableWorkbook = React.forwardRef<
               const current =
                 metaByKey.get(key) || ({ row, col } as CellMetaEntry);
               current.formula = raw;
-              if (typeof current.formulaCachedValue !== "string") {
-                current.formulaCachedValue = "";
-              }
               metaByKey.set(key, current);
               return raw;
             }
@@ -2102,7 +2099,10 @@ const HandsontableWorkbook = React.forwardRef<
                 typeof formulaMeta.formula === "string" &&
                 formulaMeta.formula.startsWith(FORMULA_PREFIX)
               ) {
-                return String(formulaMeta.formulaCachedValue ?? "");
+                if (typeof formulaMeta.formulaCachedValue === "string") {
+                  return formulaMeta.formulaCachedValue;
+                }
+                return value;
               }
               return value;
             })(),
