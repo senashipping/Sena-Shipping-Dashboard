@@ -746,8 +746,6 @@ const HandsontableWorkbook = React.forwardRef<
         });
         const display = toFormulaDisplayValue(value);
         meta.formulaCachedValue = display;
-        if (!Array.isArray(sheet.grid[meta.row])) sheet.grid[meta.row] = [];
-        sheet.grid[meta.row][meta.col] = display;
         updates.push([meta.row, meta.col, display]);
       }
       if (updates.length > 0) updatesBySheet.set(sIdx, updates);
@@ -870,6 +868,14 @@ const HandsontableWorkbook = React.forwardRef<
         // Keep metadata isolated in our per-sheet ref; avoid reading HOT's global
         // meta store which is keyed only by row/col and can bleed across sheets.
         cellMeta = getSheetCellMetaList(targetSheetName);
+      }
+      for (const meta of cellMeta || []) {
+        const formula = (meta as any)?.formula;
+        if (typeof formula !== "string" || !formula.startsWith(FORMULA_PREFIX)) {
+          continue;
+        }
+        if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
+        nextGrid[meta.row][meta.col] = formula;
       }
 
       const current = targetSheet || {
@@ -2411,10 +2417,9 @@ const HandsontableWorkbook = React.forwardRef<
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       const updatesBySheet = refreshFormulaDisplays();
       const visibleSheetIndex = activeSheetIndexRef.current;
-      const activeUpdates = updatesBySheet.get(visibleSheetIndex) || [];
       const hot = hotRef.current?.hotInstance;
-      if (hot && activeUpdates.length > 0) {
-        hot.setDataAtCell(activeUpdates, "formulaSync");
+      if (hot && updatesBySheet.has(visibleSheetIndex)) {
+        hot.render();
       }
     },
     [activeSheetIndexRef, workbookRef, refreshFormulaDisplays, hotRef],
