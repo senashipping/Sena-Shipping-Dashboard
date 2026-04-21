@@ -2057,8 +2057,7 @@ const HandsontableWorkbook = React.forwardRef<
         cp.strict = persistedMeta.strict;
 
       const image = imageMap.get(cacheKey);
-      if (image || !readOnly) {
-        cp.renderer = (
+      cp.renderer = (
           instance: any,
           td: HTMLTableCellElement,
           rowIndex: number,
@@ -2223,7 +2222,6 @@ const HandsontableWorkbook = React.forwardRef<
           }
           return td;
         };
-      }
       if (disableEditorCompletely) {
         // Submission details view must be fully non-interactive at cell level.
         cp.editor = false;
