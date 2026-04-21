@@ -884,6 +884,7 @@ const HandsontableWorkbook = React.forwardRef<
         if (typeof formula !== "string" || !formula.startsWith(FORMULA_PREFIX)) {
           continue;
         }
+        while (nextGrid.length <= meta.row) nextGrid.push([]);
         if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
         nextGrid[meta.row][meta.col] = formula;
       }
