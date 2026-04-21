@@ -354,8 +354,8 @@ const HandsontableWorkbook = React.forwardRef<
   const pendingIncomingReloadRef = React.useRef(false);
   const pendingIncomingReloadSheetIndexRef = React.useRef<number | null>(null);
   const pendingIncomingReloadWorkbookKeyRef = React.useRef<string | null>(null);
-  const lastLoadedSheetIndexRef = React.useRef<number | null>(null);
-  const lastLoadedWorkbookKeyRef = React.useRef<string | null>(null);
+  const lastLoadedSheetIndexRef = React.useRef<number>(-1);
+  const lastLoadedWorkbookKeyRef = React.useRef<string>("__NONE__");
   const isEditingRef = React.useRef(false);
   const pendingReadOnlyEmitRef = React.useRef(false);
   const readOnlyEmitDebounceTimerRef = React.useRef<ReturnType<
@@ -1067,49 +1067,55 @@ const HandsontableWorkbook = React.forwardRef<
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
-      if (!readOnly) {
-        const scopedMeta = getSheetCellMetaList(
-          sheet.name || `Sheet${targetIndex + 1}`,
-        );
-        for (const meta of scopedMeta) {
-          if (meta.className)
-            hot.setCellMeta(meta.row, meta.col, "className", meta.className);
-          if (meta.type) hot.setCellMeta(meta.row, meta.col, "type", meta.type);
-          if (meta.checkedTemplate !== undefined)
-            hot.setCellMeta(
-              meta.row,
-              meta.col,
-              "checkedTemplate",
-              meta.checkedTemplate,
-            );
-          if (meta.uncheckedTemplate !== undefined)
-            hot.setCellMeta(
-              meta.row,
-              meta.col,
-              "uncheckedTemplate",
-              meta.uncheckedTemplate,
-            );
-          if (meta.dateFormat)
-            hot.setCellMeta(meta.row, meta.col, "dateFormat", meta.dateFormat);
-          if (typeof meta.correctFormat === "boolean")
-            hot.setCellMeta(
-              meta.row,
-              meta.col,
-              "correctFormat",
-              meta.correctFormat,
-            );
-          if (meta.numericFormat)
-            hot.setCellMeta(
-              meta.row,
-              meta.col,
-              "numericFormat",
-              meta.numericFormat,
-            );
-          if (Array.isArray(meta.source))
-            hot.setCellMeta(meta.row, meta.col, "source", meta.source);
-          if (typeof meta.strict === "boolean")
-            hot.setCellMeta(meta.row, meta.col, "strict", meta.strict);
-        }
+      const colWidths = sheet.colWidthsPx;
+      if (Array.isArray(colWidths) && colWidths.length > 0) {
+        hot.updateSettings({ colWidths }, false);
+      }
+      const rowHeights = sheet.rowHeightsPx;
+      if (Array.isArray(rowHeights) && rowHeights.length > 0) {
+        hot.updateSettings({ rowHeights }, false);
+      }
+      const scopedMeta = getSheetCellMetaList(
+        sheet.name || `Sheet${targetIndex + 1}`,
+      );
+      for (const meta of scopedMeta) {
+        if (meta.className)
+          hot.setCellMeta(meta.row, meta.col, "className", meta.className);
+        if (meta.type) hot.setCellMeta(meta.row, meta.col, "type", meta.type);
+        if (meta.checkedTemplate !== undefined)
+          hot.setCellMeta(
+            meta.row,
+            meta.col,
+            "checkedTemplate",
+            meta.checkedTemplate,
+          );
+        if (meta.uncheckedTemplate !== undefined)
+          hot.setCellMeta(
+            meta.row,
+            meta.col,
+            "uncheckedTemplate",
+            meta.uncheckedTemplate,
+          );
+        if (meta.dateFormat)
+          hot.setCellMeta(meta.row, meta.col, "dateFormat", meta.dateFormat);
+        if (typeof meta.correctFormat === "boolean")
+          hot.setCellMeta(
+            meta.row,
+            meta.col,
+            "correctFormat",
+            meta.correctFormat,
+          );
+        if (meta.numericFormat)
+          hot.setCellMeta(
+            meta.row,
+            meta.col,
+            "numericFormat",
+            meta.numericFormat,
+          );
+        if (Array.isArray(meta.source))
+          hot.setCellMeta(meta.row, meta.col, "source", meta.source);
+        if (typeof meta.strict === "boolean")
+          hot.setCellMeta(meta.row, meta.col, "strict", meta.strict);
       }
       hot.render();
 
