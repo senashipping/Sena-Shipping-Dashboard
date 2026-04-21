@@ -1071,6 +1071,8 @@ const HandsontableWorkbook = React.forwardRef<
       pendingIncomingReloadSheetIndexRef.current = null;
       pendingIncomingReloadWorkbookKeyRef.current = null;
       normalizeLegacyCheckboxValues(sheet);
+      cellsCacheRef.current.clear();
+      mergeCacheFrameRef.current = { frameId: -1, mergedSet: new Set() };
 
       // Save the HOT grid's pixel scroll position before loadData resets it.
       // hot.loadData() always resets the viewport to (0,0), and the HotTable
@@ -1964,6 +1966,7 @@ const HandsontableWorkbook = React.forwardRef<
   // ─── cell renderer ───────────────────────────────────────────────────────────
   React.useEffect(() => {
     cellsCacheRef.current.clear();
+    mergeCacheFrameRef.current = { frameId: -1, mergedSet: new Set() };
   }, [
     activeSheetIndex,
     persistedCellMetaMap,
