@@ -369,6 +369,10 @@ const HandsontableWorkbook = React.forwardRef<
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const preserveScrollOnNextLoadRef = React.useRef(true);
+  const pendingScrollRestoreRafRef = React.useRef<number | null>(null);
+  const pendingScrollRestoreNestedRafRef = React.useRef<number | null>(null);
+  const pendingEditorLayoutRafRef = React.useRef<number | null>(null);
+  const pendingEditorLayoutNestedRafRef = React.useRef<number | null>(null);
   // The dialog element (if any) that wraps this component. Handsontable menus
   // must render inside it so Radix's `inert`/pointer-events restriction doesn't
   // block clicks on menu items that would otherwise land in document.body.
@@ -1167,8 +1171,18 @@ const HandsontableWorkbook = React.forwardRef<
         targetIndex === activeSheetIndexRef.current &&
         (savedScrollTop > 0 || savedScrollLeft > 0);
       if (shouldRestoreScroll) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
+        if (pendingScrollRestoreRafRef.current != null) {
+          cancelAnimationFrame(pendingScrollRestoreRafRef.current);
+          pendingScrollRestoreRafRef.current = null;
+        }
+        if (pendingScrollRestoreNestedRafRef.current != null) {
+          cancelAnimationFrame(pendingScrollRestoreNestedRafRef.current);
+          pendingScrollRestoreNestedRafRef.current = null;
+        }
+        pendingScrollRestoreRafRef.current = requestAnimationFrame(() => {
+          pendingScrollRestoreRafRef.current = null;
+          pendingScrollRestoreNestedRafRef.current = requestAnimationFrame(() => {
+            pendingScrollRestoreNestedRafRef.current = null;
             const h = hotRef.current?.hotInstance;
             const holder = h?.rootElement?.querySelector?.(
               ".ht_master .wtHolder, .wtHolder",
@@ -2184,8 +2198,18 @@ const HandsontableWorkbook = React.forwardRef<
   }, []);
 
   React.useLayoutEffect(
-    () => () => clearEditorTextLayoutListeners(),
-    [clearEditorTextLayoutListeners],
+    () => () => {
+      clearEditorTextLayoutListeners();
+      if (pendingEditorLayoutRafRef.current != null) {
+        cancelAnimationFrame(pendingEditorLayoutRafRef.current);
+        pendingEditorLayoutRafRef.current = null;
+      }
+      if (pendingEditorLayoutNestedRafRef.current != null) {
+        cancelAnimationFrame(pendingEditorLayoutNestedRafRef.current);
+        pendingEditorLayoutNestedRafRef.current = null;
+      }
+    },
+    [clearEditorTextLayoutListeners, activeSheetIndex],
   );
 
   const syncEditorIfOpen = React.useCallback(() => {
@@ -2223,8 +2247,35 @@ const HandsontableWorkbook = React.forwardRef<
         ta.removeEventListener("blur", onBlur);
       };
     };
-    requestAnimationFrame(() => requestAnimationFrame(setup));
+    if (pendingEditorLayoutRafRef.current != null) {
+      cancelAnimationFrame(pendingEditorLayoutRafRef.current);
+      pendingEditorLayoutRafRef.current = null;
+    }
+    if (pendingEditorLayoutNestedRafRef.current != null) {
+      cancelAnimationFrame(pendingEditorLayoutNestedRafRef.current);
+      pendingEditorLayoutNestedRafRef.current = null;
+    }
+    pendingEditorLayoutRafRef.current = requestAnimationFrame(() => {
+      pendingEditorLayoutRafRef.current = null;
+      pendingEditorLayoutNestedRafRef.current = requestAnimationFrame(() => {
+        pendingEditorLayoutNestedRafRef.current = null;
+        setup();
+      });
+    });
   }, [readOnly, disableEditorCompletely, clearEditorTextLayoutListeners]);
+
+  React.useEffect(() => {
+    return () => {
+      if (pendingScrollRestoreRafRef.current != null) {
+        cancelAnimationFrame(pendingScrollRestoreRafRef.current);
+        pendingScrollRestoreRafRef.current = null;
+      }
+      if (pendingScrollRestoreNestedRafRef.current != null) {
+        cancelAnimationFrame(pendingScrollRestoreNestedRafRef.current);
+        pendingScrollRestoreNestedRafRef.current = null;
+      }
+    };
+  }, [activeSheetIndex]);
 
   const afterColumnResize = React.useCallback(() => {
     flushLayoutToParent();

@@ -38,6 +38,21 @@ function mergePreviewEditsIntoWorkbook(
   const editedSheets = Array.isArray(editedPreviewWorkbook?.sheets)
     ? editedPreviewWorkbook.sheets
     : [];
+  const structuralSheetChange =
+    baseSheets.length !== editedSheets.length ||
+    editedSheets.some((editedSheet: any, sheetIndex: number) => {
+      const baseSheet = baseSheets[sheetIndex];
+      if (!baseSheet) return true;
+      return (
+        String(baseSheet?.name || "") !== String(editedSheet?.name || "") ||
+        String(baseSheet?.tabColor || "") !== String(editedSheet?.tabColor || "")
+      );
+    });
+
+  // Preserve user actions like duplicate/rename/reorder sheet in read-only workbook mode.
+  if (structuralSheetChange) {
+    return editedPreviewWorkbook;
+  }
 
   const mergedSheets = baseSheets.map((baseSheet: any, sheetIndex: number) => {
     const editedSheet = editedSheets[sheetIndex];
