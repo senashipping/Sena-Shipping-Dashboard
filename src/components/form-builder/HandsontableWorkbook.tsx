@@ -1265,7 +1265,6 @@ const HandsontableWorkbook = React.forwardRef<
     ],
   );
 
-  // ─── FIXED: handleSheetSwitch now evaluates formulas before setInitialGrid ──
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
     preserveScrollOnNextLoadRef.current = false;
@@ -1275,42 +1274,6 @@ const HandsontableWorkbook = React.forwardRef<
     }
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
-
-    // Build the grid with formula values evaluated so HotTable gets
-    // correct data immediately on remount (activeSheetIndex in key
-    // causes a full remount on every tab switch).
-    const _switchSheet = workbookRef.current.sheets[targetIndex];
-    const _evaluatedGrid = toVisibleGrid(_switchSheet);
-    const _hf = hfRef.current;
-    if (_hf && _switchSheet) {
-      const _sheetId = _hf.getSheetId(
-        _switchSheet.name || `Sheet${targetIndex + 1}`
-      );
-      if (_sheetId != null) {
-        for (const _meta of _switchSheet.cellMeta || []) {
-          if (
-            typeof _meta?.formula !== "string" ||
-            !_meta.formula.startsWith("=")
-          )
-            continue;
-          const _value = _hf.getCellValue({
-            sheet: _sheetId,
-            row: _meta.row,
-            col: _meta.col,
-          });
-          const _display = toFormulaDisplayValue(_value);
-          while (_evaluatedGrid.length <= _meta.row) _evaluatedGrid.push([]);
-          if (!Array.isArray(_evaluatedGrid[_meta.row]))
-            _evaluatedGrid[_meta.row] = [];
-          _evaluatedGrid[_meta.row][_meta.col] = resolveFormulaDisplayForGrid(
-            _display ?? "",
-            _evaluatedGrid[_meta.row][_meta.col],
-            (_meta as any)?.formulaCachedValue,
-          );
-        }
-      }
-    }
-    setInitialGrid(_evaluatedGrid);
 
     const saved = sheetSelectionRef.current[targetIndex];
     if (saved) lastSelectionRef.current = saved;
@@ -3497,7 +3460,7 @@ const HandsontableWorkbook = React.forwardRef<
         )}
         <div style={hotTableScaleStyle}>
           <HotTable
-            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            key={`ht-wb-${hotTableMountKey}`}
             ref={hotRef}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}
