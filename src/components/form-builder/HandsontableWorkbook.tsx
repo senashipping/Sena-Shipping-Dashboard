@@ -301,7 +301,7 @@ const HandsontableWorkbook = React.forwardRef<
       tabColor: s.tabColor,
     })),
   );
-  const [, setInitialGrid] = React.useState<string[][]>(() => {
+  const [initialGrid, setInitialGrid] = React.useState<string[][]>(() => {
     const first = workbookRef.current.sheets[0];
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
@@ -385,7 +385,6 @@ const HandsontableWorkbook = React.forwardRef<
   const originalSheetRowCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const rowStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
-  const stableEmptyGridRef = React.useRef<string[][]>([[""]]);
   const preserveScrollOnNextLoadRef = React.useRef(true);
   const pendingScrollRestoreRafRef = React.useRef<number | null>(null);
   const pendingScrollRestoreNestedRafRef = React.useRef<number | null>(null);
@@ -2752,7 +2751,7 @@ const HandsontableWorkbook = React.forwardRef<
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
   const hotTableSettings = React.useMemo(
     () => ({
-      data: stableEmptyGridRef.current,
+      data: initialGrid,
       rowHeaders: true,
       colHeaders: true,
       selectionMode: "multiple" as const,
@@ -2872,6 +2871,14 @@ const HandsontableWorkbook = React.forwardRef<
       afterScroll:
         readOnly || disableEditorCompletely ? undefined : syncEditorIfOpen,
       afterDeselect: disableEditorCompletely ? undefined : afterDeselect,
+      afterMount: () => {
+        const needsLoad =
+          activeSheetIndexRef.current !== lastLoadedSheetIndexRef.current ||
+          incomingWorkbookKey !== lastLoadedWorkbookKeyRef.current;
+        if (needsLoad) {
+          loadSheetIntoHot(activeSheetIndexRef.current);
+        }
+      },
       afterMergeCells,
       afterUnmergeCells,
       afterCreateRow,
@@ -2880,6 +2887,7 @@ const HandsontableWorkbook = React.forwardRef<
       afterRemoveCol,
     }),
     [
+      initialGrid,
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
@@ -2902,6 +2910,8 @@ const HandsontableWorkbook = React.forwardRef<
       afterBeginEditingForCellLayout,
       syncEditorIfOpen,
       afterDeselect,
+      loadSheetIntoHot,
+      incomingWorkbookKey,
       afterMergeCells,
       afterUnmergeCells,
       afterCreateRow,
