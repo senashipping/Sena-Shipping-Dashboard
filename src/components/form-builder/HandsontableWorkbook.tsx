@@ -601,7 +601,6 @@ const HandsontableWorkbook = React.forwardRef<
 
   const [isHotLoading, setIsHotLoading] = React.useState(false);
   const isHotLoadingRef = React.useRef(false);
-  const hotBoundSheetIndexRef = React.useRef(0);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -838,14 +837,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       if (isHotLoadingRef.current) return;
 
-      const hotSheetIndex = hotBoundSheetIndexRef.current;
-      if (
-        Number.isInteger(sheetIndex) &&
-        (sheetIndex as number) !== hotSheetIndex
-      ) {
-        return;
-      }
-      const idx = sheetIndex ?? hotSheetIndex;
+      const idx = sheetIndex ?? activeSheetIndexRef.current;
 
       const sourceGrid =
         (typeof hot.getSourceDataArray === "function"
@@ -1159,7 +1151,6 @@ const HandsontableWorkbook = React.forwardRef<
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
-      hotBoundSheetIndexRef.current = targetIndex;
       const colWidths = sheet.colWidthsPx;
       if (Array.isArray(colWidths) && colWidths.length > 0) {
         hot.updateSettings({ colWidths }, false);
