@@ -1894,6 +1894,43 @@ const HandsontableWorkbook = React.forwardRef<
 
   // ─── sheet management ────────────────────────────────────────────────────────
 
+  const deleteActiveSheet = () => {
+    if (!readOnly) collectCurrentSheetFromHot(true);
+    const sheets = workbookRef.current.sheets;
+    if (sheets.length <= 1) return;
+    const idx = activeSheetIndexRef.current;
+    const sheet = sheets[idx];
+    const sheetName = sheet?.name || `Sheet${idx + 1}`;
+    const confirmed = window.confirm(`Delete sheet "${sheetName}"?`);
+    if (!confirmed) return;
+    const nextSheets = sheets.filter((_, i) => i !== idx);
+    workbookRef.current.sheets = nextSheets;
+    const nextMetaScoped: Record<
+      string,
+      Record<number, Record<number, CellMetaEntry>>
+    > = {};
+    for (let i = 0; i < nextSheets.length; i++) {
+      const nextName = nextSheets[i]?.name || `Sheet${i + 1}`;
+      const scoped = getSheetCellMetaList(nextName);
+      const byRow: Record<number, Record<number, CellMetaEntry>> = {};
+      for (const meta of scoped) {
+        if (!Number.isFinite(+meta.row) || !Number.isFinite(+meta.col)) continue;
+        const row = +meta.row;
+        const col = +meta.col;
+        if (!byRow[row]) byRow[row] = {};
+        byRow[row][col] = { ...meta, row, col };
+      }
+      nextMetaScoped[nextName] = byRow;
+    }
+    cellMetaRef.current = nextMetaScoped;
+    initializeHyperFormula();
+    refreshFormulaDisplays();
+    setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
+    const nextIndex = Math.min(idx, nextSheets.length - 1);
+    setInitialGrid(toVisibleGrid(nextSheets[nextIndex]));
+    setActiveSheetIndex(nextIndex);
+  };
+
   const duplicateActiveSheet = () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
     const idx = activeSheetIndexRef.current;
@@ -3392,6 +3429,13 @@ const HandsontableWorkbook = React.forwardRef<
               </Button>
             )}
 
+            <TB
+              onClick={deleteActiveSheet}
+              title="Delete active sheet"
+              disabled={safeSheets.length <= 1}
+            >
+              🗑 Delete
+            </TB>
             <TB onClick={duplicateActiveSheet} title="Duplicate active sheet">
               ⧉ Duplicate
             </TB>
