@@ -201,6 +201,7 @@ function syncHandsontableTextEditorToCell(hot: any) {
 
 const toFormulaDisplayValue = (value: unknown) => {
   if (value == null) return "";
+  if (value === "") return "";
   if (typeof value === "object") {
     const err = (value as any)?.value;
     if (typeof err === "string" && err.startsWith("#")) return err;
@@ -720,7 +721,7 @@ const HandsontableWorkbook = React.forwardRef<
         { length: rows },
         (_, row) =>
           Array.from({ length: cols }, (_, col) => {
-            const formula = getFormulaMeta(sheet, row, col)?.formula;
+            const formula = metaByKey.get(cellCoordKey(row, col))?.formula;
             if (
               typeof formula === "string" &&
               formula.startsWith(FORMULA_PREFIX)
@@ -750,7 +751,7 @@ const HandsontableWorkbook = React.forwardRef<
     hfRef.current = HyperFormula.buildFromSheets(byName, {
       licenseKey: "gpl-v3",
     });
-  }, [getFormulaMeta]);
+  }, []);
 
   const refreshFormulaDisplays = React.useCallback(() => {
     const hf = hfRef.current;
@@ -910,14 +911,27 @@ const HandsontableWorkbook = React.forwardRef<
           cellMeta = dedupeCellMetaByCoordinate(targetSheet.cellMeta);
         }
       }
-      for (const meta of cellMeta || []) {
-        const formula = (meta as any)?.formula;
-        if (typeof formula !== "string" || !formula.startsWith(FORMULA_PREFIX)) {
-          continue;
+      const hf = hfRef.current;
+      const sheetId = hf?.getSheetId(targetSheetName);
+      if (hf && sheetId != null) {
+        for (const meta of cellMeta || []) {
+          const formula = (meta as any)?.formula;
+          if (
+            typeof formula !== "string" ||
+            !formula.startsWith(FORMULA_PREFIX)
+          ) {
+            continue;
+          }
+          const value = hf.getCellValue({
+            sheet: sheetId,
+            row: meta.row,
+            col: meta.col,
+          });
+          const display = toFormulaDisplayValue(value);
+          while (nextGrid.length <= meta.row) nextGrid.push([]);
+          if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
+          nextGrid[meta.row][meta.col] = display ?? "";
         }
-        while (nextGrid.length <= meta.row) nextGrid.push([]);
-        if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
-        nextGrid[meta.row][meta.col] = formula;
       }
 
       const current = targetSheet || {
@@ -1136,7 +1150,7 @@ const HandsontableWorkbook = React.forwardRef<
             const display = toFormulaDisplayValue(value);
             while (visibleGrid.length <= meta.row) visibleGrid.push([]);
             if (!Array.isArray(visibleGrid[meta.row])) visibleGrid[meta.row] = [];
-            visibleGrid[meta.row][meta.col] = display;
+            visibleGrid[meta.row][meta.col] = display ?? "";
           }
         }
       }
