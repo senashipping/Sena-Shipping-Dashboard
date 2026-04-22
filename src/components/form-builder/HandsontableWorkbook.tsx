@@ -1052,29 +1052,6 @@ const HandsontableWorkbook = React.forwardRef<
       if (gridChanged) {
         sheet.grid = nextGrid;
       }
-      if (checkboxCoords.size > 0) {
-        let fallbackChanged = false;
-        const fallbackGrid = sheet.grid.map((row) => {
-          if (!Array.isArray(row)) return row;
-          let rowChanged = false;
-          const nextRow = [...row];
-          for (let c = 0; c < row.length; c++) {
-            const raw = row[c];
-            const normalizedRaw = String(raw ?? "")
-              .trim()
-              .toLowerCase();
-            if (normalizedRaw === "false") {
-              nextRow[c] = "";
-              rowChanged = true;
-              fallbackChanged = true;
-            }
-          }
-          return rowChanged ? nextRow : row;
-        });
-        if (fallbackChanged) {
-          sheet.grid = fallbackGrid;
-        }
-      }
     },
     [],
   );
@@ -1275,7 +1252,8 @@ const HandsontableWorkbook = React.forwardRef<
     if (targetIndex === activeSheetIndex) return;
     preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
-      collectCurrentSheetFromHot(true, activeSheetIndex);
+      const currentIndex = activeSheetIndexRef.current;
+      collectCurrentSheetFromHot(true, currentIndex);
       emitWorkbookToParent();
     }
     const hot = hotRef.current?.hotInstance;
