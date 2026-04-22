@@ -212,6 +212,15 @@ const toFormulaDisplayValue = (value: unknown) => {
   return String(value);
 };
 
+const resolveFormulaDisplayForGrid = (
+  computedDisplay: string,
+  existingCell: unknown,
+) => {
+  if (computedDisplay !== "") return computedDisplay;
+  const existingText = existingCell == null ? "" : String(existingCell);
+  return existingText;
+};
+
 const normalizeVisibleGrid = (rawGrid: unknown): string[][] => {
   const base =
     Array.isArray(rawGrid) && rawGrid.length > 0 ? (rawGrid as unknown[]) : [[""]];
@@ -912,7 +921,10 @@ const HandsontableWorkbook = React.forwardRef<
           const display = toFormulaDisplayValue(value);
           while (nextGrid.length <= meta.row) nextGrid.push([]);
           if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
-          nextGrid[meta.row][meta.col] = display ?? "";
+          nextGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
+            display ?? "",
+            nextGrid[meta.row][meta.col],
+          );
         }
       }
 
@@ -1101,7 +1113,10 @@ const HandsontableWorkbook = React.forwardRef<
             const display = toFormulaDisplayValue(value);
             while (visibleGrid.length <= meta.row) visibleGrid.push([]);
             if (!Array.isArray(visibleGrid[meta.row])) visibleGrid[meta.row] = [];
-            visibleGrid[meta.row][meta.col] = display ?? "";
+            visibleGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
+              display ?? "",
+              visibleGrid[meta.row][meta.col],
+            );
           }
         }
       }
@@ -1289,7 +1304,10 @@ const HandsontableWorkbook = React.forwardRef<
           while (_evaluatedGrid.length <= _meta.row) _evaluatedGrid.push([]);
           if (!Array.isArray(_evaluatedGrid[_meta.row]))
             _evaluatedGrid[_meta.row] = [];
-          _evaluatedGrid[_meta.row][_meta.col] = _display ?? "";
+          _evaluatedGrid[_meta.row][_meta.col] = resolveFormulaDisplayForGrid(
+            _display ?? "",
+            _evaluatedGrid[_meta.row][_meta.col],
+          );
         }
       }
     }
