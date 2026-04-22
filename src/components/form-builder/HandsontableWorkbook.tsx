@@ -215,9 +215,14 @@ const toFormulaDisplayValue = (value: unknown) => {
 const resolveFormulaDisplayForGrid = (
   computedDisplay: string,
   existingCell: unknown,
+  cachedDisplay?: unknown,
 ) => {
   if (computedDisplay !== "") return computedDisplay;
+  if (typeof cachedDisplay === "string" && cachedDisplay !== "") {
+    return cachedDisplay;
+  }
   const existingText = existingCell == null ? "" : String(existingCell);
+  if (existingText.trim().startsWith(FORMULA_PREFIX)) return "";
   return existingText;
 };
 
@@ -924,6 +929,7 @@ const HandsontableWorkbook = React.forwardRef<
           nextGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
             display ?? "",
             nextGrid[meta.row][meta.col],
+            (meta as any)?.formulaCachedValue,
           );
         }
       }
@@ -1116,6 +1122,7 @@ const HandsontableWorkbook = React.forwardRef<
             visibleGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
               display ?? "",
               visibleGrid[meta.row][meta.col],
+              (meta as any)?.formulaCachedValue,
             );
           }
         }
@@ -1307,6 +1314,7 @@ const HandsontableWorkbook = React.forwardRef<
           _evaluatedGrid[_meta.row][_meta.col] = resolveFormulaDisplayForGrid(
             _display ?? "",
             _evaluatedGrid[_meta.row][_meta.col],
+            (_meta as any)?.formulaCachedValue,
           );
         }
       }
