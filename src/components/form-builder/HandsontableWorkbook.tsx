@@ -1272,7 +1272,6 @@ const HandsontableWorkbook = React.forwardRef<
     if (!readOnly) {
       const currentIndex = activeSheetIndexRef.current;
       collectCurrentSheetFromHot(true, currentIndex);
-      emitWorkbookToParent();
     }
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
