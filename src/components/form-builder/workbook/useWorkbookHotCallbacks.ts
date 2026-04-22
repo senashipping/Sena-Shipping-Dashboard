@@ -59,6 +59,7 @@ export const useWorkbookHotCallbacks = ({
         if (
           Array.isArray(changes) &&
           changes.length > 0 &&
+          (!readOnly || userDrivenSource) &&
           source !== "updateData" &&
           String(source) !== "yesNoSync" &&
           String(source) !== "formulaSync"
