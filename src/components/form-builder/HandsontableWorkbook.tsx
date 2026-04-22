@@ -586,6 +586,7 @@ const HandsontableWorkbook = React.forwardRef<
   const shouldUseFormulaEngine = currentCellCount <= 20000;
 
   const [isHotLoading, setIsHotLoading] = React.useState(false);
+  const isHotLoadingRef = React.useRef(false);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -820,6 +821,7 @@ const HandsontableWorkbook = React.forwardRef<
     (includeMeta: boolean, sheetIndex?: number) => {
       const hot = hotRef.current?.hotInstance;
       if (!hot) return;
+      if (isHotLoadingRef.current) return;
 
       const idx = sheetIndex ?? activeSheetIndexRef.current;
 
@@ -1062,6 +1064,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+      isHotLoadingRef.current = true;
       setIsHotLoading(true);
       lastLoadedSheetIndexRef.current = targetIndex;
       lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
@@ -1236,6 +1239,7 @@ const HandsontableWorkbook = React.forwardRef<
         });
       }
       preserveScrollOnNextLoadRef.current = true;
+      isHotLoadingRef.current = false;
       setIsHotLoading(false);
     },
     [
@@ -2394,17 +2398,29 @@ const HandsontableWorkbook = React.forwardRef<
 
   const afterMergeCells = React.useCallback(() => {
     if (!readOnly) {
+      const idx = activeSheetIndexRef.current;
       scheduleUndoRedoRefresh();
-      setTimeout(() => collectCurrentSheetFromHot(true), 0);
+      setTimeout(() => collectCurrentSheetFromHot(true, idx), 0);
     }
-  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+  }, [
+    readOnly,
+    activeSheetIndexRef,
+    collectCurrentSheetFromHot,
+    scheduleUndoRedoRefresh,
+  ]);
 
   const afterUnmergeCells = React.useCallback(() => {
     if (!readOnly) {
+      const idx = activeSheetIndexRef.current;
       scheduleUndoRedoRefresh();
-      setTimeout(() => collectCurrentSheetFromHot(true), 0);
+      setTimeout(() => collectCurrentSheetFromHot(true, idx), 0);
     }
-  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+  }, [
+    readOnly,
+    activeSheetIndexRef,
+    collectCurrentSheetFromHot,
+    scheduleUndoRedoRefresh,
+  ]);
 
   const afterCreateRow = React.useCallback(() => {
     rowStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
