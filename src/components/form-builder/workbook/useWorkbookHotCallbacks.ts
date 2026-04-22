@@ -42,18 +42,6 @@ export const useWorkbookHotCallbacks = ({
     if (s.startsWith("Autofill.") || s === "afterAutofill") return true;
     if (s.startsWith("ContextMenu.")) return true;
     if (s.startsWith("Delete.")) return true;
-    // Treat unknown non-internal sources as user-driven to avoid dropping
-    // genuine edits from plugins/custom integrations in preview mode.
-    if (
-      s !== "loadData" &&
-      s !== "updateData" &&
-      s !== "yesNoSync" &&
-      s !== "formulaSync" &&
-      s !== "ObserveChanges.change" &&
-      s !== "auto"
-    ) {
-      return true;
-    }
     return false;
   };
 

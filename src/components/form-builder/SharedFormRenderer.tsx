@@ -77,24 +77,7 @@ function mergePreviewEditsIntoWorkbook(
 
     return {
       ...baseSheet,
-      name: editedSheet?.name ?? baseSheet?.name,
-      tabColor: editedSheet?.tabColor ?? baseSheet?.tabColor,
       grid: nextGrid,
-      mergeCells: Array.isArray(editedSheet?.mergeCells)
-        ? editedSheet.mergeCells
-        : baseSheet?.mergeCells,
-      cellMeta: Array.isArray(editedSheet?.cellMeta)
-        ? editedSheet.cellMeta
-        : baseSheet?.cellMeta,
-      images: Array.isArray(editedSheet?.images)
-        ? editedSheet.images
-        : baseSheet?.images,
-      colWidthsPx: Array.isArray(editedSheet?.colWidthsPx)
-        ? editedSheet.colWidthsPx
-        : baseSheet?.colWidthsPx,
-      rowHeightsPx: Array.isArray(editedSheet?.rowHeightsPx)
-        ? editedSheet.rowHeightsPx
-        : baseSheet?.rowHeightsPx,
     };
   });
 
