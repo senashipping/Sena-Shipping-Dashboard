@@ -684,7 +684,17 @@ const HandsontableWorkbook = React.forwardRef<
       const sheet = sheets[sIdx];
       const metaByKey = new Map<string, CellMetaEntry>();
       for (const m of sheet.cellMeta || []) {
-        metaByKey.set(cellCoordKey(m.row, m.col), { ...m });
+        const normalizedMeta: CellMetaEntry = { ...m };
+        // Legacy cleanup: older saves could persist an empty string cache for
+        // formula cells, which later makes populated cells render as blank.
+        if (
+          typeof normalizedMeta.formula === "string" &&
+          normalizedMeta.formula.startsWith(FORMULA_PREFIX) &&
+          normalizedMeta.formulaCachedValue === ""
+        ) {
+          delete (normalizedMeta as any).formulaCachedValue;
+        }
+        metaByKey.set(cellCoordKey(m.row, m.col), normalizedMeta);
       }
       const rows = Math.max(sheet.grid?.length || 1, 1);
       const cols = Math.max(
@@ -2102,7 +2112,12 @@ const HandsontableWorkbook = React.forwardRef<
                 typeof formulaMeta.formula === "string" &&
                 formulaMeta.formula.startsWith(FORMULA_PREFIX)
               ) {
-                if (typeof formulaMeta.formulaCachedValue === "string") {
+                if (
+                  typeof formulaMeta.formulaCachedValue === "string" &&
+                  (formulaMeta.formulaCachedValue !== "" ||
+                    value == null ||
+                    String(value) === "")
+                ) {
                   return formulaMeta.formulaCachedValue;
                 }
                 return value;
