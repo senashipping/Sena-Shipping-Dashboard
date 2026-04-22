@@ -35,17 +35,26 @@ export const useWorkbookHotCallbacks = ({
 }) => {
   const isUserDrivenChangeSource = (source: string) => {
     const s = String(source || "");
-    return (
-      s === "edit" ||
-      s === "CopyPaste.paste" ||
-      s === "Autofill.fill" ||
-      s === "afterAutofill" ||
-      s === "UndoRedo.undo" ||
-      s === "UndoRedo.redo" ||
-      s === "ContextMenu.clearCells" ||
-      s === "Delete.row" ||
-      s === "Delete.col"
-    );
+    if (!s) return false;
+    if (s === "edit" || s === "CopyPaste.paste" || s === "CopyPaste.cut")
+      return true;
+    if (s.startsWith("UndoRedo.")) return true;
+    if (s.startsWith("Autofill.") || s === "afterAutofill") return true;
+    if (s.startsWith("ContextMenu.")) return true;
+    if (s.startsWith("Delete.")) return true;
+    // Treat unknown non-internal sources as user-driven to avoid dropping
+    // genuine edits from plugins/custom integrations in preview mode.
+    if (
+      s !== "loadData" &&
+      s !== "updateData" &&
+      s !== "yesNoSync" &&
+      s !== "formulaSync" &&
+      s !== "ObserveChanges.change" &&
+      s !== "auto"
+    ) {
+      return true;
+    }
+    return false;
   };
 
   const afterChange = React.useCallback(

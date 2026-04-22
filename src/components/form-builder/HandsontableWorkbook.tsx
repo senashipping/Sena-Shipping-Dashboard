@@ -488,6 +488,27 @@ const HandsontableWorkbook = React.forwardRef<
     },
     [],
   );
+
+  const reindexScopedMetaFromSheets = React.useCallback((sheets: SheetData[]) => {
+    const nextScoped: Record<
+      string,
+      Record<number, Record<number, CellMetaEntry>>
+    > = {};
+    for (let idx = 0; idx < sheets.length; idx++) {
+      const sheet = sheets[idx];
+      const sheetName = sheet?.name || `Sheet${idx + 1}`;
+      const byRow: Record<number, Record<number, CellMetaEntry>> = {};
+      for (const meta of dedupeCellMetaByCoordinate(sheet?.cellMeta || [])) {
+        if (!Number.isFinite(+meta.row) || !Number.isFinite(+meta.col)) continue;
+        const row = +meta.row;
+        const col = +meta.col;
+        if (!byRow[row]) byRow[row] = {};
+        byRow[row][col] = { ...meta, row, col };
+      }
+      nextScoped[sheetName] = byRow;
+    }
+    cellMetaRef.current = nextScoped;
+  }, []);
   const safeGrid =
     Array.isArray(activeSheet?.grid) && activeSheet.grid.length > 0
       ? activeSheet.grid
@@ -601,6 +622,8 @@ const HandsontableWorkbook = React.forwardRef<
 
   const [isHotLoading, setIsHotLoading] = React.useState(false);
   const isHotLoadingRef = React.useRef(false);
+  const hotLoadedSheetIndexRef = React.useRef(0);
+  const hotLoadSessionRef = React.useRef(0);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -837,7 +860,7 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       if (isHotLoadingRef.current) return;
 
-      const idx = sheetIndex ?? activeSheetIndexRef.current;
+      const idx = sheetIndex ?? hotLoadedSheetIndexRef.current;
 
       const sourceGrid =
         (typeof hot.getSourceDataArray === "function"
@@ -907,32 +930,7 @@ const HandsontableWorkbook = React.forwardRef<
           cellMeta = dedupeCellMetaByCoordinate(targetSheet.cellMeta);
         }
       }
-      const hf = hfRef.current;
-      const sheetId = hf?.getSheetId(targetSheetName);
-      if (hf && sheetId != null) {
-        for (const meta of cellMeta || []) {
-          const formula = (meta as any)?.formula;
-          if (
-            typeof formula !== "string" ||
-            !formula.startsWith(FORMULA_PREFIX)
-          ) {
-            continue;
-          }
-          const value = hf.getCellValue({
-            sheet: sheetId,
-            row: meta.row,
-            col: meta.col,
-          });
-          const display = toFormulaDisplayValue(value);
-          while (nextGrid.length <= meta.row) nextGrid.push([]);
-          if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
-          nextGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
-            display ?? "",
-            nextGrid[meta.row][meta.col],
-            (meta as any)?.formulaCachedValue,
-          );
-        }
-      }
+      hydrateFormulaDisplayGrid(targetSheet, nextGrid, idx);
 
       const current = targetSheet || {
         name: `Sheet${idx + 1}`,
@@ -998,7 +996,11 @@ const HandsontableWorkbook = React.forwardRef<
       };
       setSheetCellMetaFromList(targetSheetName, cellMeta);
     },
-    [readOnly, getSheetCellMetaList, setSheetCellMetaFromList],
+    [
+      readOnly,
+      getSheetCellMetaList,
+      setSheetCellMetaFromList,
+    ],
   );
 
   React.useImperativeHandle(
@@ -1033,6 +1035,43 @@ const HandsontableWorkbook = React.forwardRef<
 
   const toVisibleGrid = React.useCallback(
     (sheet?: SheetData) => normalizeVisibleGrid(sheet?.grid),
+    [],
+  );
+
+  const hydrateFormulaDisplayGrid = React.useCallback(
+    (
+      sheet: SheetData | undefined,
+      baseGrid: string[][],
+      sheetIndex: number,
+    ): string[][] => {
+      const nextGrid = baseGrid;
+      const hf = hfRef.current;
+      if (!sheet || !hf) return nextGrid;
+      const sheetId = hf.getSheetId(sheet.name || `Sheet${sheetIndex + 1}`);
+      if (sheetId == null) return nextGrid;
+      for (const meta of sheet.cellMeta || []) {
+        if (
+          typeof meta?.formula !== "string" ||
+          !meta.formula.startsWith(FORMULA_PREFIX)
+        ) {
+          continue;
+        }
+        const value = hf.getCellValue({
+          sheet: sheetId,
+          row: meta.row,
+          col: meta.col,
+        });
+        const display = toFormulaDisplayValue(value);
+        while (nextGrid.length <= meta.row) nextGrid.push([]);
+        if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
+        nextGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
+          display ?? "",
+          nextGrid[meta.row][meta.col],
+          (meta as any)?.formulaCachedValue,
+        );
+      }
+      return nextGrid;
+    },
     [],
   );
 
@@ -1082,6 +1121,8 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
+      hotLoadSessionRef.current += 1;
+      const loadSession = hotLoadSessionRef.current;
       isHotLoadingRef.current = true;
       setIsHotLoading(true);
       lastLoadedSheetIndexRef.current = targetIndex;
@@ -1099,34 +1140,11 @@ const HandsontableWorkbook = React.forwardRef<
       const savedScrollTop = masterHolder?.scrollTop ?? 0;
       const savedScrollLeft = masterHolder?.scrollLeft ?? 0;
 
-      const visibleGrid = toVisibleGrid(sheet);
-      const hf = hfRef.current;
-      if (hf) {
-        const sheetId = hf.getSheetId(sheet.name || `Sheet${targetIndex + 1}`);
-        if (sheetId != null) {
-          for (const meta of sheet.cellMeta || []) {
-            if (
-              typeof meta?.formula !== "string" ||
-              !meta.formula.startsWith(FORMULA_PREFIX)
-            ) {
-              continue;
-            }
-            const value = hf.getCellValue({
-              sheet: sheetId,
-              row: meta.row,
-              col: meta.col,
-            });
-            const display = toFormulaDisplayValue(value);
-            while (visibleGrid.length <= meta.row) visibleGrid.push([]);
-            if (!Array.isArray(visibleGrid[meta.row])) visibleGrid[meta.row] = [];
-            visibleGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
-              display ?? "",
-              visibleGrid[meta.row][meta.col],
-              (meta as any)?.formulaCachedValue,
-            );
-          }
-        }
-      }
+      const visibleGrid = hydrateFormulaDisplayGrid(
+        sheet,
+        toVisibleGrid(sheet),
+        targetIndex,
+      );
       const sourceColCount = Math.max(
         1,
         ...((sheet?.grid || []).map((row) =>
@@ -1151,6 +1169,7 @@ const HandsontableWorkbook = React.forwardRef<
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
+      hotLoadedSheetIndexRef.current = targetIndex;
       const colWidths = sheet.colWidthsPx;
       if (Array.isArray(colWidths) && colWidths.length > 0) {
         hot.updateSettings({ colWidths }, false);
@@ -1244,9 +1263,11 @@ const HandsontableWorkbook = React.forwardRef<
           pendingScrollRestoreNestedRafRef.current = null;
         }
         pendingScrollRestoreRafRef.current = requestAnimationFrame(() => {
+          if (loadSession !== hotLoadSessionRef.current) return;
           pendingScrollRestoreRafRef.current = null;
           pendingScrollRestoreNestedRafRef.current = requestAnimationFrame(
             () => {
+              if (loadSession !== hotLoadSessionRef.current) return;
               pendingScrollRestoreNestedRafRef.current = null;
               const h = hotRef.current?.hotInstance;
               const holder = h?.rootElement?.querySelector?.(
@@ -1270,6 +1291,7 @@ const HandsontableWorkbook = React.forwardRef<
       toVisibleGrid,
       normalizeLegacyCheckboxValues,
       getSheetCellMetaList,
+      hydrateFormulaDisplayGrid,
     ],
   );
 
@@ -1289,36 +1311,11 @@ const HandsontableWorkbook = React.forwardRef<
     // correct data immediately on remount (activeSheetIndex in key
     // causes a full remount on every tab switch).
     const _switchSheet = workbookRef.current.sheets[targetIndex];
-    const _evaluatedGrid = toVisibleGrid(_switchSheet);
-    const _hf = hfRef.current;
-    if (_hf && _switchSheet) {
-      const _sheetId = _hf.getSheetId(
-        _switchSheet.name || `Sheet${targetIndex + 1}`
-      );
-      if (_sheetId != null) {
-        for (const _meta of _switchSheet.cellMeta || []) {
-          if (
-            typeof _meta?.formula !== "string" ||
-            !_meta.formula.startsWith("=")
-          )
-            continue;
-          const _value = _hf.getCellValue({
-            sheet: _sheetId,
-            row: _meta.row,
-            col: _meta.col,
-          });
-          const _display = toFormulaDisplayValue(_value);
-          while (_evaluatedGrid.length <= _meta.row) _evaluatedGrid.push([]);
-          if (!Array.isArray(_evaluatedGrid[_meta.row]))
-            _evaluatedGrid[_meta.row] = [];
-          _evaluatedGrid[_meta.row][_meta.col] = resolveFormulaDisplayForGrid(
-            _display ?? "",
-            _evaluatedGrid[_meta.row][_meta.col],
-            (_meta as any)?.formulaCachedValue,
-          );
-        }
-      }
-    }
+    const _evaluatedGrid = hydrateFormulaDisplayGrid(
+      _switchSheet,
+      toVisibleGrid(_switchSheet),
+      targetIndex,
+    );
     setInitialGrid(_evaluatedGrid);
 
     const saved = sheetSelectionRef.current[targetIndex];
@@ -1908,10 +1905,7 @@ const HandsontableWorkbook = React.forwardRef<
     cloned.name = `${source.name} Copy`;
     const nextSheets = [...workbookRef.current.sheets, cloned];
     workbookRef.current.sheets = nextSheets;
-    setSheetCellMetaFromList(
-      cloned.name || `Sheet${nextSheets.length}`,
-      cloned.cellMeta || [],
-    );
+    reindexScopedMetaFromSheets(nextSheets);
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1928,6 +1922,7 @@ const HandsontableWorkbook = React.forwardRef<
     const [moved] = next.splice(activeSheetIndex, 1);
     next.splice(target, 0, moved);
     workbookRef.current.sheets = next;
+    reindexScopedMetaFromSheets(next);
     setSheetTabs(next.map((s) => ({ name: s.name, tabColor: s.tabColor })));
     setInitialGrid(toVisibleGrid(next[target]));
     setActiveSheetIndex(target);
@@ -1951,9 +1946,18 @@ const HandsontableWorkbook = React.forwardRef<
     if (sig === lastIncomingSignatureRef.current) return;
 
     const hot = hotRef.current?.hotInstance;
-    if (readOnly && isEditingRef.current) return;
-    if (hot && typeof hot.isEditorOpened === "function" && hot.isEditorOpened())
+    if (readOnly && isEditingRef.current) {
+      pendingIncomingReloadRef.current = true;
+      pendingIncomingReloadSheetIndexRef.current = activeSheetIndexRef.current;
+      pendingIncomingReloadWorkbookKeyRef.current = incomingWorkbookKey;
       return;
+    }
+    if (hot && typeof hot.isEditorOpened === "function" && hot.isEditorOpened()) {
+      pendingIncomingReloadRef.current = true;
+      pendingIncomingReloadSheetIndexRef.current = activeSheetIndexRef.current;
+      pendingIncomingReloadWorkbookKeyRef.current = incomingWorkbookKey;
+      return;
+    }
 
     lastIncomingSignatureRef.current = sig;
 
@@ -1967,9 +1971,7 @@ const HandsontableWorkbook = React.forwardRef<
         mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
       ),
     };
-    for (const s of workbookRef.current.sheets) {
-      setSheetCellMetaFromList(s.name || "Sheet", s.cellMeta || []);
-    }
+    reindexScopedMetaFromSheets(workbookRef.current.sheets);
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1987,7 +1989,13 @@ const HandsontableWorkbook = React.forwardRef<
         Math.min(prev, Math.max(0, nextSheets.length - 1)),
       );
     }
-  }, [normalizedIncomingSheets, readOnly]);
+  }, [
+    normalizedIncomingSheets,
+    readOnly,
+    incomingWorkbookKey,
+    activeSheetIndexRef,
+    reindexScopedMetaFromSheets,
+  ]);
 
   const hotTableMountKey = React.useMemo(
     () => hotTableMountSignature(normalizedIncomingSheets),
@@ -2536,10 +2544,6 @@ const HandsontableWorkbook = React.forwardRef<
   });
 
   const flushPendingPreviewSyncs = React.useCallback(() => {
-    if (pendingReadOnlyEmitRef.current) {
-      pendingReadOnlyEmitRef.current = false;
-      scheduleReadOnlyEmit();
-    }
     if (pendingIncomingReloadRef.current) {
       const pendingSheetIndex =
         pendingIncomingReloadSheetIndexRef.current ??
@@ -2555,6 +2559,10 @@ const HandsontableWorkbook = React.forwardRef<
       if (stillNeedsReload) {
         loadSheetIntoHot(pendingSheetIndex);
       }
+    }
+    if (pendingReadOnlyEmitRef.current) {
+      pendingReadOnlyEmitRef.current = false;
+      scheduleReadOnlyEmit();
     }
   }, [incomingWorkbookKey, loadSheetIntoHot, scheduleReadOnlyEmit]);
 
@@ -3272,6 +3280,7 @@ const HandsontableWorkbook = React.forwardRef<
                         i === activeSheetIndex ? { ...s, name: n } : s,
                       );
                       workbookRef.current.sheets = next;
+                      reindexScopedMetaFromSheets(next);
                       setSheetTabs(
                         next.map((s) => ({
                           name: s.name,
@@ -3297,6 +3306,7 @@ const HandsontableWorkbook = React.forwardRef<
                       i === activeSheetIndex ? { ...s, name: n } : s,
                     );
                     workbookRef.current.sheets = next;
+                    reindexScopedMetaFromSheets(next);
                     setSheetTabs(
                       next.map((s) => ({ name: s.name, tabColor: s.tabColor })),
                     );
@@ -3344,6 +3354,7 @@ const HandsontableWorkbook = React.forwardRef<
                     { name: `Sheet${safeSheets.length + 1}`, grid: [[""]] },
                   ];
                   workbookRef.current.sheets = nextSheets;
+                  reindexScopedMetaFromSheets(nextSheets);
                   setSheetTabs(
                     nextSheets.map((s) => ({
                       name: s.name,

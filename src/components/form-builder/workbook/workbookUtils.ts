@@ -365,14 +365,44 @@ const dimListSignature = (arr?: number[]) => {
   return arr.join(",");
 };
 
+const gridColsSignature = (grid?: string[][]) => {
+  if (!Array.isArray(grid) || grid.length === 0) return 0;
+  let maxCols = 0;
+  for (let i = 0; i < grid.length; i++) {
+    const row = grid[i];
+    if (Array.isArray(row) && row.length > maxCols) maxCols = row.length;
+  }
+  return maxCols;
+};
+
+const formulaMetaSignature = (cellMeta?: NonNullable<SheetData["cellMeta"]>) => {
+  if (!Array.isArray(cellMeta) || cellMeta.length === 0) return "";
+  const formulaEntries = cellMeta
+    .filter((m) => typeof (m as any)?.formula === "string")
+    .map((m) => {
+      const formula = String((m as any).formula || "");
+      const cached = String((m as any).formulaCachedValue || "");
+      return `${m.row},${m.col},${formula},${cached}`;
+    })
+    .sort();
+  if (formulaEntries.length === 0) return "";
+  if (formulaEntries.length > 200) {
+    const sampleHead = formulaEntries.slice(0, 3).join(";");
+    const sampleTail = formulaEntries.slice(-3).join(";");
+    return `${formulaEntries.length}|${sampleHead}|${sampleTail}`;
+  }
+  return formulaEntries.join(";");
+};
+
 export const workbookSignature = (sheets: SheetData[]) =>
   sheets
     .map((s) =>
       [
         s.name,
-        `${s.grid?.length || 0}x${s.grid?.[0]?.length || 0}`,
+        `${s.grid?.length || 0}x${gridColsSignature(s.grid)}`,
         `m${s.mergeCells?.length || 0}`,
         `c${s.cellMeta?.length || 0}`,
+        `f${formulaMetaSignature(s.cellMeta)}`,
         s.tabColor || "",
         `cw${dimListSignature(s.colWidthsPx)}`,
         `rh${dimListSignature(s.rowHeightsPx)}`,
