@@ -302,7 +302,7 @@ const HandsontableWorkbook = React.forwardRef<
       tabColor: s.tabColor,
     })),
   );
-  const [, setInitialGrid] = React.useState<string[][]>(() => {
+  const [initialGrid, setInitialGrid] = React.useState<string[][]>(() => {
     const first = workbookRef.current.sheets[0];
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
@@ -378,7 +378,6 @@ const HandsontableWorkbook = React.forwardRef<
     typeof setTimeout
   > | null>(null);
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
-  const stableEmptyGridRef = React.useRef<string[][]>([[""]]);
   const mergeCacheFrameRef = React.useRef<{
     frameId: number;
     mergedSet: Set<string>;
@@ -1312,6 +1311,7 @@ const HandsontableWorkbook = React.forwardRef<
     }
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
+    setInitialGrid(toVisibleGrid(workbookRef.current.sheets[targetIndex]));
     const saved = sheetSelectionRef.current[targetIndex];
     if (saved) lastSelectionRef.current = saved;
     setSelectionLabel(toRangeLabel(lastSelectionRef.current));
@@ -2446,24 +2446,16 @@ const HandsontableWorkbook = React.forwardRef<
   const afterMergeCells = React.useCallback(() => {
     if (!readOnly) {
       scheduleUndoRedoRefresh();
-      const scheduledSheetIndex = activeSheetIndexRef.current;
-      setTimeout(() => {
-        if (activeSheetIndexRef.current !== scheduledSheetIndex) return;
-        collectCurrentSheetFromHot(true, scheduledSheetIndex);
-      }, 0);
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
-  }, [activeSheetIndexRef, readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterUnmergeCells = React.useCallback(() => {
     if (!readOnly) {
       scheduleUndoRedoRefresh();
-      const scheduledSheetIndex = activeSheetIndexRef.current;
-      setTimeout(() => {
-        if (activeSheetIndexRef.current !== scheduledSheetIndex) return;
-        collectCurrentSheetFromHot(true, scheduledSheetIndex);
-      }, 0);
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
-  }, [activeSheetIndexRef, readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterCreateRow = React.useCallback(() => {
     rowStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
@@ -2769,6 +2761,7 @@ const HandsontableWorkbook = React.forwardRef<
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
   const hotTableSettings = React.useMemo(
     () => ({
+      data: initialGrid,
       rowHeaders: true,
       colHeaders: true,
       selectionMode: "multiple" as const,
@@ -2896,6 +2889,7 @@ const HandsontableWorkbook = React.forwardRef<
       afterRemoveCol,
     }),
     [
+      initialGrid,
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
@@ -3495,7 +3489,6 @@ const HandsontableWorkbook = React.forwardRef<
              * leak onto another at the same coordinates. */
             key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
             ref={hotRef}
-            data={stableEmptyGridRef.current}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}
             manualRowResize={!readOnly && !lightweightPerformance}
