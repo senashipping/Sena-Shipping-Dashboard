@@ -2575,7 +2575,7 @@ const HandsontableWorkbook = React.forwardRef<
     yesNoOppositeCellMapRef,
     readOnly,
     scheduleUndoRedoRefresh,
-    activeSheetIndexRef,
+    activeSheetIndexRef: hotLoadedSheetIndexRef,
     workbookRef,
     readOnlyPreviewDirtyRef,
     isEditingRef,
