@@ -19,7 +19,6 @@ import {
   buildYesNoOppositeMap,
   cellCoordKey,
   classNameHasFillable,
-  cloneEditableGrid,
   dedupeCellMetaByCoordinate,
   deepCloneSheet,
   extractYesNoPairToken,
@@ -378,7 +377,6 @@ const HandsontableWorkbook = React.forwardRef<
     typeof setTimeout
   > | null>(null);
   const cellsCacheRef = React.useRef<Map<string, any>>(new Map());
-  const stableEmptyGridRef = React.useRef<string[][]>([[""]]);
   const mergeCacheFrameRef = React.useRef<{
     frameId: number;
     mergedSet: Set<string>;
@@ -387,6 +385,7 @@ const HandsontableWorkbook = React.forwardRef<
   const originalSheetRowCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const rowStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
+  const stableEmptyGridRef = React.useRef<string[][]>([[""]]);
   const preserveScrollOnNextLoadRef = React.useRef(true);
   const pendingScrollRestoreRafRef = React.useRef<number | null>(null);
   const pendingScrollRestoreNestedRafRef = React.useRef<number | null>(null);
@@ -1919,7 +1918,6 @@ const HandsontableWorkbook = React.forwardRef<
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
-    setInitialGrid(toVisibleGrid(nextSheets[nextSheets.length - 1]));
     setActiveSheetIndex(nextSheets.length - 1);
   };
 
@@ -1933,7 +1931,6 @@ const HandsontableWorkbook = React.forwardRef<
     next.splice(target, 0, moved);
     workbookRef.current.sheets = next;
     setSheetTabs(next.map((s) => ({ name: s.name, tabColor: s.tabColor })));
-    setInitialGrid(toVisibleGrid(next[target]));
     setActiveSheetIndex(target);
   };
 
@@ -1983,12 +1980,6 @@ const HandsontableWorkbook = React.forwardRef<
     // reset the tab and briefly bind sheet 0's grid to the wrong context.
     if (sheetCountChanged) {
       setActiveSheetIndex(0);
-      const first = nextSheets[0]?.grid?.length ? nextSheets[0].grid : [[""]];
-      if (!readOnly) {
-        setInitialGrid(cloneEditableGrid(first));
-      } else {
-        setInitialGrid(cloneEditableGrid(first));
-      }
     } else {
       setActiveSheetIndex((prev) =>
         Math.min(prev, Math.max(0, nextSheets.length - 1)),
@@ -2013,14 +2004,6 @@ const HandsontableWorkbook = React.forwardRef<
       incomingWorkbookKey !== lastLoadedWorkbookKeyRef.current;
     if (!needsReload) return;
     const hot = hotRef.current?.hotInstance;
-    if (!hot) {
-      const scheduledSheetIndex = activeSheetIndex;
-      requestAnimationFrame(() => {
-        if (activeSheetIndexRef.current !== scheduledSheetIndex) return;
-        loadSheetIntoHot(scheduledSheetIndex);
-      });
-      return;
-    }
     const isEditorOpen =
       typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
     if (readOnly && (isEditorOpen || isEditingRef.current)) {
@@ -2454,24 +2437,16 @@ const HandsontableWorkbook = React.forwardRef<
   const afterMergeCells = React.useCallback(() => {
     if (!readOnly) {
       scheduleUndoRedoRefresh();
-      const scheduledSheetIndex = activeSheetIndexRef.current;
-      setTimeout(() => {
-        if (activeSheetIndexRef.current !== scheduledSheetIndex) return;
-        collectCurrentSheetFromHot(true, scheduledSheetIndex);
-      }, 0);
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
-  }, [activeSheetIndexRef, readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterUnmergeCells = React.useCallback(() => {
     if (!readOnly) {
       scheduleUndoRedoRefresh();
-      const scheduledSheetIndex = activeSheetIndexRef.current;
-      setTimeout(() => {
-        if (activeSheetIndexRef.current !== scheduledSheetIndex) return;
-        collectCurrentSheetFromHot(true, scheduledSheetIndex);
-      }, 0);
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
-  }, [activeSheetIndexRef, readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterCreateRow = React.useCallback(() => {
     rowStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
@@ -2777,6 +2752,7 @@ const HandsontableWorkbook = React.forwardRef<
   const heavyPluginsEnabled = !readOnly && !lightweightPerformance;
   const hotTableSettings = React.useMemo(
     () => ({
+      data: stableEmptyGridRef.current,
       rowHeaders: true,
       colHeaders: true,
       selectionMode: "multiple" as const,
@@ -3426,9 +3402,6 @@ const HandsontableWorkbook = React.forwardRef<
                       tabColor: s.tabColor,
                     })),
                   );
-                  setInitialGrid(
-                    toVisibleGrid(nextSheets[nextSheets.length - 1]),
-                  );
                   setActiveSheetIndex(nextSheets.length - 1);
                 }}
               >
@@ -3501,9 +3474,8 @@ const HandsontableWorkbook = React.forwardRef<
             /* New instance per sheet / workbook shape: Handsontable reuses `metaManager` across
              * `loadData()`, so dropdowns, types, merge flags, etc. from one sheet could otherwise
              * leak onto another at the same coordinates. */
-            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            key={`ht-wb-${hotTableMountKey}`}
             ref={hotRef}
-            data={stableEmptyGridRef.current}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}
             manualRowResize={!readOnly && !lightweightPerformance}
