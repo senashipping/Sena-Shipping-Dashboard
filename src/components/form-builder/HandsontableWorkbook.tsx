@@ -589,16 +589,6 @@ const HandsontableWorkbook = React.forwardRef<
     };
   }, [hotTableZoom]);
 
-  const currentCellCount = React.useMemo(
-    () =>
-      renderedGrid.reduce(
-        (t, row) => t + (Array.isArray(row) ? row.length : 0),
-        0,
-      ),
-    [renderedGrid],
-  );
-  const shouldUseFormulaEngine = currentCellCount <= 20000;
-
   const [isHotLoading, setIsHotLoading] = React.useState(false);
   const isHotLoadingRef = React.useRef(false);
   const hotLoadedSheetIndexRef = React.useRef(0);
