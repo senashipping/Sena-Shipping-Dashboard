@@ -362,6 +362,7 @@ const HandsontableWorkbook = React.forwardRef<
   const cellMetaRef = React.useRef<
     Record<string, Record<number, Record<number, CellMetaEntry>>>
   >({});
+  
   const suppressNextHotReloadRef = React.useRef(false);
   const pendingIncomingReloadRef = React.useRef(false);
   const pendingIncomingReloadSheetIndexRef = React.useRef<number | null>(null);
