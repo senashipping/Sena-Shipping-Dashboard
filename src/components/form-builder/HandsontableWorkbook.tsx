@@ -2013,6 +2013,14 @@ const HandsontableWorkbook = React.forwardRef<
       incomingWorkbookKey !== lastLoadedWorkbookKeyRef.current;
     if (!needsReload) return;
     const hot = hotRef.current?.hotInstance;
+    if (!hot) {
+      const scheduledSheetIndex = activeSheetIndex;
+      requestAnimationFrame(() => {
+        if (activeSheetIndexRef.current !== scheduledSheetIndex) return;
+        loadSheetIntoHot(scheduledSheetIndex);
+      });
+      return;
+    }
     const isEditorOpen =
       typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
     if (readOnly && (isEditorOpen || isEditingRef.current)) {
