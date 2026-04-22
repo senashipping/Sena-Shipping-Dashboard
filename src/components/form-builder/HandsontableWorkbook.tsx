@@ -211,6 +211,20 @@ const toFormulaDisplayValue = (value: unknown) => {
   return String(value);
 };
 
+const normalizeVisibleGrid = (rawGrid: unknown): string[][] => {
+  const base =
+    Array.isArray(rawGrid) && rawGrid.length > 0 ? (rawGrid as unknown[]) : [[""]];
+  const maxCols = Math.max(
+    1,
+    ...base.map((row) => (Array.isArray(row) ? row.length : 0)),
+  );
+  return base.map((row) => {
+    const normalizedRow = Array.isArray(row) ? [...row] : [];
+    while (normalizedRow.length < maxCols) normalizedRow.push("");
+    return normalizedRow.map((cell) => (cell == null ? "" : String(cell)));
+  });
+};
+
 // Prevent toolbar buttons from stealing focus from the grid
 const noFocusSteal = (e: React.MouseEvent) => e.preventDefault();
 
@@ -291,8 +305,7 @@ const HandsontableWorkbook = React.forwardRef<
     const first = workbookRef.current.sheets[0];
     const base =
       Array.isArray(first?.grid) && first.grid.length > 0 ? first.grid : [[""]];
-    if (!readOnly) return cloneEditableGrid(base);
-    return cloneEditableGrid(base);
+    return normalizeVisibleGrid(base);
   });
 
   const [renaming, setRenaming] = React.useState(false);
@@ -369,7 +382,9 @@ const HandsontableWorkbook = React.forwardRef<
     mergedSet: Set<string>;
   }>({ frameId: -1, mergedSet: new Set() });
   const originalSheetColCountRef = React.useRef<Map<number, number>>(new Map());
+  const originalSheetRowCountRef = React.useRef<Map<number, number>>(new Map());
   const columnStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
+  const rowStructureDirtyRef = React.useRef<Map<number, boolean>>(new Map());
   const preserveScrollOnNextLoadRef = React.useRef(true);
   const pendingScrollRestoreRafRef = React.useRef<number | null>(null);
   const pendingScrollRestoreNestedRafRef = React.useRef<number | null>(null);
@@ -836,6 +851,15 @@ const HandsontableWorkbook = React.forwardRef<
           cell == null ? "" : String(cell),
         ),
       );
+      const originalRowCount = originalSheetRowCountRef.current.get(idx) || 1;
+      const rowStructureChanged = rowStructureDirtyRef.current.get(idx) === true;
+      if (
+        !rowStructureChanged &&
+        Number.isFinite(originalRowCount) &&
+        originalRowCount > 0
+      ) {
+        while (nextGrid.length < originalRowCount) nextGrid.push([]);
+      }
       if (!readOnly) {
         const originalColCount = originalSheetColCountRef.current.get(idx) || 1;
         const structureChanged =
@@ -994,12 +1018,8 @@ const HandsontableWorkbook = React.forwardRef<
   }, [readOnly, collectCurrentSheetFromHot, emitWorkbookToParent]);
 
   const toVisibleGrid = React.useCallback(
-    (sheet?: SheetData) => {
-      const base = sheet?.grid?.length ? sheet.grid : [[""]];
-      if (!readOnly) return cloneEditableGrid(base);
-      return cloneEditableGrid(base);
-    },
-    [readOnly],
+    (sheet?: SheetData) => normalizeVisibleGrid(sheet?.grid),
+    [],
   );
 
   const normalizeLegacyCheckboxValues = React.useCallback(
@@ -1097,14 +1117,40 @@ const HandsontableWorkbook = React.forwardRef<
       const savedScrollLeft = masterHolder?.scrollLeft ?? 0;
 
       const visibleGrid = toVisibleGrid(sheet);
+      const hf = hfRef.current;
+      if (hf) {
+        const sheetId = hf.getSheetId(sheet.name || `Sheet${targetIndex + 1}`);
+        if (sheetId != null) {
+          for (const meta of sheet.cellMeta || []) {
+            if (
+              typeof meta?.formula !== "string" ||
+              !meta.formula.startsWith(FORMULA_PREFIX)
+            ) {
+              continue;
+            }
+            const value = hf.getCellValue({
+              sheet: sheetId,
+              row: meta.row,
+              col: meta.col,
+            });
+            const display = toFormulaDisplayValue(value);
+            while (visibleGrid.length <= meta.row) visibleGrid.push([]);
+            if (!Array.isArray(visibleGrid[meta.row])) visibleGrid[meta.row] = [];
+            visibleGrid[meta.row][meta.col] = display;
+          }
+        }
+      }
       const sourceColCount = Math.max(
         1,
         ...((sheet?.grid || []).map((row) =>
           Array.isArray(row) ? row.length : 0,
         ) || [1]),
       );
+      const sourceRowCount = Math.max(1, sheet?.grid?.length || 1);
       originalSheetColCountRef.current.set(targetIndex, sourceColCount);
+      originalSheetRowCountRef.current.set(targetIndex, sourceRowCount);
       columnStructureDirtyRef.current.set(targetIndex, false);
+      rowStructureDirtyRef.current.set(targetIndex, false);
       const formulaSet = new Set<string>();
       for (const m of sheet.cellMeta || []) {
         if (
@@ -2398,8 +2444,9 @@ const HandsontableWorkbook = React.forwardRef<
   }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterCreateRow = React.useCallback(() => {
+    rowStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
     scheduleUndoRedoRefresh();
-  }, [scheduleUndoRedoRefresh]);
+  }, [activeSheetIndexRef, scheduleUndoRedoRefresh]);
 
   const afterCreateCol = React.useCallback(() => {
     columnStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
@@ -2407,8 +2454,9 @@ const HandsontableWorkbook = React.forwardRef<
   }, [scheduleUndoRedoRefresh]);
 
   const afterRemoveRow = React.useCallback(() => {
+    rowStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
     scheduleUndoRedoRefresh();
-  }, [scheduleUndoRedoRefresh]);
+  }, [activeSheetIndexRef, scheduleUndoRedoRefresh]);
 
   const afterRemoveCol = React.useCallback(() => {
     columnStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
