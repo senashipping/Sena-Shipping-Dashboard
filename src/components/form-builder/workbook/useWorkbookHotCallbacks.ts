@@ -33,16 +33,33 @@ export const useWorkbookHotCallbacks = ({
     sheetIndex: number,
   ) => void;
 }) => {
+  const isUserDrivenChangeSource = (source: string) => {
+    const s = String(source || "");
+    return (
+      s === "edit" ||
+      s === "CopyPaste.paste" ||
+      s === "Autofill.fill" ||
+      s === "afterAutofill" ||
+      s === "UndoRedo.undo" ||
+      s === "UndoRedo.redo" ||
+      s === "ContextMenu.clearCells" ||
+      s === "Delete.row" ||
+      s === "Delete.col"
+    );
+  };
+
   const afterChange = React.useCallback(
     (changes: any, source: string) => {
       const changeSheetIndex = activeSheetIndexRef.current;
       setTimeout(() => {
         if (source === "loadData") return;
         const hot = hotRef.current?.hotInstance;
+        const userDrivenSource = isUserDrivenChangeSource(source);
 
         if (
           Array.isArray(changes) &&
           changes.length > 0 &&
+          userDrivenSource &&
           source !== "updateData" &&
           String(source) !== "yesNoSync" &&
           String(source) !== "formulaSync"
@@ -81,6 +98,7 @@ export const useWorkbookHotCallbacks = ({
           scheduleUndoRedoRefresh();
         }
         if (readOnly && changes && source !== "updateData") {
+          if (!userDrivenSource) return;
           const idx = changeSheetIndex;
           const sheet = workbookRef.current.sheets[idx];
           if (!sheet) return;
