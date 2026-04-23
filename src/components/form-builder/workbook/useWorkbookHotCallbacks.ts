@@ -52,14 +52,12 @@ export const useWorkbookHotCallbacks = ({
       const changeSheetIndex = activeSheetIndexRef.current;
 
       setTimeout(() => {
-        // GUARD: If the user switched sheets while this timer was pending,
-        // the change belonged to the previous sheet's HOT instance.
-        // Writing it now would corrupt the currently visible sheet's data.
-        if (activeSheetIndexRef.current !== changeSheetIndex) return;
-
         if (source === "loadData") return;
         const hot = hotRef.current?.hotInstance;
         const userDrivenSource = isUserDrivenChangeSource(source);
+        // True when the user has already navigated to a different sheet tab
+        // while this timer was queued.
+        const sheetSwitched = activeSheetIndexRef.current !== changeSheetIndex;
 
         if (
           Array.isArray(changes) &&
@@ -69,12 +67,18 @@ export const useWorkbookHotCallbacks = ({
           String(source) !== "yesNoSync" &&
           String(source) !== "formulaSync"
         ) {
+          // Always propagate cell/formula changes to the correct sheet even
+          // when the user has already switched tabs — onCellChanges receives
+          // an explicit sheetIndex and writes only to that sheet's data, so
+          // it cannot corrupt the newly visible sheet.
           onCellChanges?.(
             changes as [number, number, unknown, unknown][],
             source,
             changeSheetIndex,
           );
-          if (hot) {
+          // Only mutate the live HOT DOM (yesNoSync) when still on the same
+          // sheet; after a switch the HOT instance now belongs to a new sheet.
+          if (!sheetSwitched && hot) {
             const oppositeCellByKey = yesNoOppositeCellMapRef.current;
             for (const [row, col, oldValue, newValue] of changes as [
               number,
@@ -98,6 +102,9 @@ export const useWorkbookHotCallbacks = ({
             }
           }
         }
+
+        // Everything below is specific to the currently visible sheet.
+        if (sheetSwitched) return;
 
         if (!readOnly && Array.isArray(changes) && changes.length > 0) {
           scheduleUndoRedoRefresh();

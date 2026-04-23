@@ -1261,7 +1261,6 @@ const HandsontableWorkbook = React.forwardRef<
     ],
   );
 
-  // ─── FIXED: handleSheetSwitch now evaluates formulas before setInitialGrid ──
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
     preserveScrollOnNextLoadRef.current = false;
@@ -1274,9 +1273,9 @@ const HandsontableWorkbook = React.forwardRef<
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
 
-    // Build the grid with formula values evaluated so HotTable gets
-    // correct data immediately on remount (activeSheetIndex in key
-    // causes a full remount on every tab switch).
+    // Build the grid with formula results evaluated so the newly mounted
+    // HotTable instance (key changes on every tab switch) gets correct
+    // display values immediately, before loadSheetIntoHot runs.
     const _switchSheet = workbookRef.current.sheets[targetIndex];
     const _evaluatedGrid = toVisibleGrid(_switchSheet);
     const _hf = hfRef.current;
@@ -1294,7 +1293,12 @@ const HandsontableWorkbook = React.forwardRef<
           while (_evaluatedGrid.length <= _meta.row) _evaluatedGrid.push([]);
           if (!Array.isArray(_evaluatedGrid[_meta.row]))
             _evaluatedGrid[_meta.row] = [];
-          _evaluatedGrid[_meta.row][_meta.col] = _meta.formula;
+          const _value = _hf.getCellValue({
+            sheet: _sheetId,
+            row: _meta.row,
+            col: _meta.col,
+          });
+          _evaluatedGrid[_meta.row][_meta.col] = toFormulaDisplayValue(_value);
         }
       }
     }
@@ -2468,12 +2472,25 @@ const HandsontableWorkbook = React.forwardRef<
           hf.setCellContents({ sheet: sheetId, row, col }, [[valueText]]);
         }
       }
-      if (typeof (hf as any).rebuildAndRecalculate === "function") {
-        (hf as any).rebuildAndRecalculate();
-      }
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
-      setSheetCellMetaFromList(sheet.name || `Sheet${sheetIndex + 1}`, sheet.cellMeta);
       const updatesBySheet = refreshFormulaDisplays();
+      // Re-sync cellMetaRef after refreshFormulaDisplays has written the
+      // correct formulaCachedValues into the sheet.cellMeta objects.
+      setSheetCellMetaFromList(sheet.name || `Sheet${sheetIndex + 1}`, sheet.cellMeta);
+      // Keep formulaCellSetRef in sync so the cells callback marks newly
+      // entered formula cells as editable without requiring a full reload.
+      if (sheetIndex === activeSheetIndexRef.current) {
+        const nextFormulaSet = new Set<string>();
+        for (const m of sheet.cellMeta) {
+          if (
+            typeof (m as any).formula === "string" &&
+            (m as any).formula.startsWith(FORMULA_PREFIX)
+          ) {
+            nextFormulaSet.add(cellCoordKey(m.row, m.col));
+          }
+        }
+        formulaCellSetRef.current = nextFormulaSet;
+      }
       const visibleSheetIndex = activeSheetIndexRef.current;
       const activeUpdates = updatesBySheet.get(visibleSheetIndex) || [];
       const hot = hotRef.current?.hotInstance;
@@ -2481,7 +2498,7 @@ const HandsontableWorkbook = React.forwardRef<
         hot.render();
       }
     },
-    [activeSheetIndexRef, workbookRef, refreshFormulaDisplays, hotRef],
+    [activeSheetIndexRef, workbookRef, refreshFormulaDisplays, hotRef, setSheetCellMetaFromList],
   );
 
   const { afterChange } = useWorkbookHotCallbacks({
