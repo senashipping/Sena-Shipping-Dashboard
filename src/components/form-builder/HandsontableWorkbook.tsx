@@ -900,7 +900,18 @@ const HandsontableWorkbook = React.forwardRef<
           }
           while (nextGrid.length <= meta.row) nextGrid.push([]);
           if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
-          nextGrid[meta.row][meta.col] = formula;
+          // Prefer HOT's raw source value when it is already a formula string —
+          // this means the user typed a new formula that hasn't been committed
+          // to cellMeta yet (e.g. "Save Changes" clicked before afterChange's
+          // handleCellChanges ran). Falling back to cellMeta.formula only when
+          // HOT stored an evaluated result (a non-formula string).
+          const hotRaw = nextGrid[meta.row][meta.col] ?? "";
+          if (
+            typeof hotRaw !== "string" ||
+            !hotRaw.startsWith(FORMULA_PREFIX)
+          ) {
+            nextGrid[meta.row][meta.col] = formula;
+          }
         }
       }
 
@@ -1085,6 +1096,18 @@ const HandsontableWorkbook = React.forwardRef<
       normalizeLegacyCheckboxValues(sheet);
       cellsCacheRef.current.clear();
       mergeCacheFrameRef.current = { frameId: -1, mergedSet: new Set() };
+      // Clear undo/redo history so per-sheet actions don't bleed across tabs.
+      // Previously a full HOT remount (via key change) reset history for free;
+      // without the remount we must do it explicitly.
+      const urPlugin = (hot as any)?.getPlugin?.("undoRedo") as any;
+      if (urPlugin) {
+        if (typeof urPlugin.clear === "function") {
+          urPlugin.clear();
+        } else {
+          if (Array.isArray(urPlugin.doneActions)) urPlugin.doneActions = [];
+          if (Array.isArray(urPlugin.undoneActions)) urPlugin.undoneActions = [];
+        }
+      }
 
       const masterHolder = hot.rootElement?.querySelector?.(
         ".ht_master .wtHolder, .wtHolder",
@@ -3402,7 +3425,7 @@ const HandsontableWorkbook = React.forwardRef<
         )}
         <div style={hotTableScaleStyle}>
           <HotTable
-            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
+            key={`ht-wb-${hotTableMountKey}`}
             ref={hotRef}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}
