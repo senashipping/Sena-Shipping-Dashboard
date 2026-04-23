@@ -1997,12 +1997,19 @@ const HandsontableWorkbook = React.forwardRef<
   );
 
   React.useEffect(() => {
-    if (suppressNextHotReloadRef.current) {
+    // A sheet switch MUST always load the new sheet's data — never suppress it.
+    // suppression only applies to parent-roundtrip reloads (same sheet, parent
+    // reflected our emitted data back), which would redundantly reload the data
+    // we just collected. Without this guard the removed-key optimisation would
+    // block the only path that loads the new sheet into the persistent HOT instance.
+    const sheetSwitched = activeSheetIndex !== lastLoadedSheetIndexRef.current;
+    if (!sheetSwitched && suppressNextHotReloadRef.current) {
       suppressNextHotReloadRef.current = false;
       return;
     }
+    suppressNextHotReloadRef.current = false;
     const needsReload =
-      activeSheetIndex !== lastLoadedSheetIndexRef.current ||
+      sheetSwitched ||
       incomingWorkbookKey !== lastLoadedWorkbookKeyRef.current;
     if (!needsReload) return;
     const hot = hotRef.current?.hotInstance;
