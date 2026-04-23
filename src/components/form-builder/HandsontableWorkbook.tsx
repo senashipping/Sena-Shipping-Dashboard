@@ -212,20 +212,6 @@ const toFormulaDisplayValue = (value: unknown) => {
   return String(value);
 };
 
-const resolveFormulaDisplayForGrid = (
-  computedDisplay: string,
-  existingCell: unknown,
-  cachedDisplay?: unknown,
-) => {
-  if (computedDisplay !== "") return computedDisplay;
-  if (typeof cachedDisplay === "string" && cachedDisplay !== "") {
-    return cachedDisplay;
-  }
-  const existingText = existingCell == null ? "" : String(existingCell);
-  if (existingText.trim().startsWith(FORMULA_PREFIX)) return "";
-  return existingText;
-};
-
 const normalizeVisibleGrid = (rawGrid: unknown): string[][] => {
   const base =
     Array.isArray(rawGrid) && rawGrid.length > 0 ? (rawGrid as unknown[]) : [[""]];
@@ -589,9 +575,17 @@ const HandsontableWorkbook = React.forwardRef<
     };
   }, [hotTableZoom]);
 
+  const currentCellCount = React.useMemo(
+    () =>
+      renderedGrid.reduce(
+        (t, row) => t + (Array.isArray(row) ? row.length : 0),
+        0,
+      ),
+    [renderedGrid],
+  );
+  const shouldUseFormulaEngine = currentCellCount <= 20000;
+
   const [isHotLoading, setIsHotLoading] = React.useState(false);
-  const isHotLoadingRef = React.useRef(false);
-  const hotLoadedSheetIndexRef = React.useRef(0);
 
   const imageMap = React.useMemo(() => {
     const map = new Map<
@@ -826,9 +820,8 @@ const HandsontableWorkbook = React.forwardRef<
     (includeMeta: boolean, sheetIndex?: number) => {
       const hot = hotRef.current?.hotInstance;
       if (!hot) return;
-      if (isHotLoadingRef.current) return;
 
-      const idx = sheetIndex ?? hotLoadedSheetIndexRef.current;
+      const idx = sheetIndex ?? activeSheetIndexRef.current;
 
       const sourceGrid =
         (typeof hot.getSourceDataArray === "function"
@@ -917,11 +910,7 @@ const HandsontableWorkbook = React.forwardRef<
           const display = toFormulaDisplayValue(value);
           while (nextGrid.length <= meta.row) nextGrid.push([]);
           if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
-          nextGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
-            display ?? "",
-            nextGrid[meta.row][meta.col],
-            (meta as any)?.formulaCachedValue,
-          );
+          nextGrid[meta.row][meta.col] = display ?? "";
         }
       }
 
@@ -1063,6 +1052,29 @@ const HandsontableWorkbook = React.forwardRef<
       if (gridChanged) {
         sheet.grid = nextGrid;
       }
+      if (checkboxCoords.size > 0) {
+        let fallbackChanged = false;
+        const fallbackGrid = sheet.grid.map((row) => {
+          if (!Array.isArray(row)) return row;
+          let rowChanged = false;
+          const nextRow = [...row];
+          for (let c = 0; c < row.length; c++) {
+            const raw = row[c];
+            const normalizedRaw = String(raw ?? "")
+              .trim()
+              .toLowerCase();
+            if (normalizedRaw === "false") {
+              nextRow[c] = "";
+              rowChanged = true;
+              fallbackChanged = true;
+            }
+          }
+          return rowChanged ? nextRow : row;
+        });
+        if (fallbackChanged) {
+          sheet.grid = fallbackGrid;
+        }
+      }
     },
     [],
   );
@@ -1073,7 +1085,6 @@ const HandsontableWorkbook = React.forwardRef<
       if (!hot) return;
       const sheet = workbookRef.current.sheets[targetIndex];
       if (!sheet) return;
-      isHotLoadingRef.current = true;
       setIsHotLoading(true);
       lastLoadedSheetIndexRef.current = targetIndex;
       lastLoadedWorkbookKeyRef.current = incomingWorkbookKey;
@@ -1110,11 +1121,7 @@ const HandsontableWorkbook = React.forwardRef<
             const display = toFormulaDisplayValue(value);
             while (visibleGrid.length <= meta.row) visibleGrid.push([]);
             if (!Array.isArray(visibleGrid[meta.row])) visibleGrid[meta.row] = [];
-            visibleGrid[meta.row][meta.col] = resolveFormulaDisplayForGrid(
-              display ?? "",
-              visibleGrid[meta.row][meta.col],
-              (meta as any)?.formulaCachedValue,
-            );
+            visibleGrid[meta.row][meta.col] = display ?? "";
           }
         }
       }
@@ -1142,7 +1149,6 @@ const HandsontableWorkbook = React.forwardRef<
       yesNoOppositeCellMapRef.current = buildYesNoOppositeMap(sheet.cellMeta);
       setInitialGrid(visibleGrid);
       hot.loadData(visibleGrid);
-      hotLoadedSheetIndexRef.current = targetIndex;
       const colWidths = sheet.colWidthsPx;
       if (Array.isArray(colWidths) && colWidths.length > 0) {
         hot.updateSettings({ colWidths }, false);
@@ -1253,7 +1259,6 @@ const HandsontableWorkbook = React.forwardRef<
         });
       }
       preserveScrollOnNextLoadRef.current = true;
-      isHotLoadingRef.current = false;
       setIsHotLoading(false);
     },
     [
@@ -1265,15 +1270,50 @@ const HandsontableWorkbook = React.forwardRef<
     ],
   );
 
+  // ─── FIXED: handleSheetSwitch now evaluates formulas before setInitialGrid ──
   const handleSheetSwitch = (targetIndex: number) => {
     if (targetIndex === activeSheetIndex) return;
     preserveScrollOnNextLoadRef.current = false;
     if (!readOnly) {
-      const currentIndex = activeSheetIndexRef.current;
-      collectCurrentSheetFromHot(true, currentIndex);
+      // Use ref (not state) to avoid stale closure — state may lag behind
+      // the actual loaded sheet index on rapid tab switches.
+      collectCurrentSheetFromHot(true, activeSheetIndexRef.current);
+      emitWorkbookToParent();
     }
     const hot = hotRef.current?.hotInstance;
     if (hot) getToolbarActionRange(hot);
+
+    // Build the grid with formula values evaluated so HotTable gets
+    // correct data immediately on remount (activeSheetIndex in key
+    // causes a full remount on every tab switch).
+    const _switchSheet = workbookRef.current.sheets[targetIndex];
+    const _evaluatedGrid = toVisibleGrid(_switchSheet);
+    const _hf = hfRef.current;
+    if (_hf && _switchSheet) {
+      const _sheetId = _hf.getSheetId(
+        _switchSheet.name || `Sheet${targetIndex + 1}`
+      );
+      if (_sheetId != null) {
+        for (const _meta of _switchSheet.cellMeta || []) {
+          if (
+            typeof _meta?.formula !== "string" ||
+            !_meta.formula.startsWith("=")
+          )
+            continue;
+          const _value = _hf.getCellValue({
+            sheet: _sheetId,
+            row: _meta.row,
+            col: _meta.col,
+          });
+          const _display = toFormulaDisplayValue(_value);
+          while (_evaluatedGrid.length <= _meta.row) _evaluatedGrid.push([]);
+          if (!Array.isArray(_evaluatedGrid[_meta.row]))
+            _evaluatedGrid[_meta.row] = [];
+          _evaluatedGrid[_meta.row][_meta.col] = _display ?? "";
+        }
+      }
+    }
+    setInitialGrid(_evaluatedGrid);
 
     const saved = sheetSelectionRef.current[targetIndex];
     if (saved) lastSelectionRef.current = saved;
@@ -1793,12 +1833,9 @@ const HandsontableWorkbook = React.forwardRef<
 
   // ─── export ─────────────────────────────────────────────────────────────────
 
-  // FIX (BUG 5): Pass activeSheetIndexRef.current explicitly so that a fast
-  // tab-switch followed immediately by a resize saves to the correct sheet
-  // instead of the stale hotLoadedSheetIndexRef value.
   const flushLayoutToParent = React.useCallback(() => {
     if (readOnly) return;
-    collectCurrentSheetFromHot(true, activeSheetIndexRef.current);
+    collectCurrentSheetFromHot(true);
   }, [readOnly, collectCurrentSheetFromHot]);
 
   const exportXlsx = async () => {
@@ -1856,43 +1893,6 @@ const HandsontableWorkbook = React.forwardRef<
 
   // ─── sheet management ────────────────────────────────────────────────────────
 
-  const deleteActiveSheet = () => {
-    if (!readOnly) collectCurrentSheetFromHot(true);
-    const sheets = workbookRef.current.sheets;
-    if (sheets.length <= 1) return;
-    const idx = activeSheetIndexRef.current;
-    const sheet = sheets[idx];
-    const sheetName = sheet?.name || `Sheet${idx + 1}`;
-    const confirmed = window.confirm(`Delete sheet "${sheetName}"?`);
-    if (!confirmed) return;
-    const nextSheets = sheets.filter((_, i) => i !== idx);
-    workbookRef.current.sheets = nextSheets;
-    const nextMetaScoped: Record<
-      string,
-      Record<number, Record<number, CellMetaEntry>>
-    > = {};
-    for (let i = 0; i < nextSheets.length; i++) {
-      const nextName = nextSheets[i]?.name || `Sheet${i + 1}`;
-      const scoped = getSheetCellMetaList(nextName);
-      const byRow: Record<number, Record<number, CellMetaEntry>> = {};
-      for (const meta of scoped) {
-        if (!Number.isFinite(+meta.row) || !Number.isFinite(+meta.col)) continue;
-        const row = +meta.row;
-        const col = +meta.col;
-        if (!byRow[row]) byRow[row] = {};
-        byRow[row][col] = { ...meta, row, col };
-      }
-      nextMetaScoped[nextName] = byRow;
-    }
-    cellMetaRef.current = nextMetaScoped;
-    initializeHyperFormula();
-    refreshFormulaDisplays();
-    setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
-    const nextIndex = Math.min(idx, nextSheets.length - 1);
-    setInitialGrid(toVisibleGrid(nextSheets[nextIndex]));
-    setActiveSheetIndex(nextIndex);
-  };
-
   const duplicateActiveSheet = () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
     const idx = activeSheetIndexRef.current;
@@ -1906,10 +1906,6 @@ const HandsontableWorkbook = React.forwardRef<
       cloned.name || `Sheet${nextSheets.length}`,
       cloned.cellMeta || [],
     );
-    // FIX (BUG 6): Reinitialize HyperFormula so the new duplicated sheet is
-    // registered and cross-sheet formula references resolve correctly.
-    initializeHyperFormula();
-    refreshFormulaDisplays();
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
     );
@@ -1926,11 +1922,6 @@ const HandsontableWorkbook = React.forwardRef<
     const [moved] = next.splice(activeSheetIndex, 1);
     next.splice(target, 0, moved);
     workbookRef.current.sheets = next;
-    // FIX (BUG 7): Reinitialize HyperFormula so numeric sheet IDs match the
-    // new order; otherwise cross-sheet formula references resolve against
-    // the wrong sheet.
-    initializeHyperFormula();
-    refreshFormulaDisplays();
     setSheetTabs(next.map((s) => ({ name: s.name, tabColor: s.tabColor })));
     setInitialGrid(toVisibleGrid(next[target]));
     setActiveSheetIndex(target);
@@ -2154,8 +2145,6 @@ const HandsontableWorkbook = React.forwardRef<
             (() => {
               const currentSheet =
                 workbookRef.current.sheets[activeSheetIndexRef.current];
-              // FIX (BUG 2): getFormulaMeta is now listed in cellsCallback's
-              // dependency array so this closure always holds a fresh reference.
               const formulaMeta = getFormulaMeta(
                 currentSheet,
                 rowIndex,
@@ -2302,9 +2291,6 @@ const HandsontableWorkbook = React.forwardRef<
       persistedCellMetaMap,
       activeSheetName,
       getCellMeta,
-      // FIX (BUG 2): getFormulaMeta was missing from this dependency array,
-      // causing the renderer to close over a stale reference after updates.
-      getFormulaMeta,
       fillableCellSet,
       imageMap,
       readOnly,
@@ -2432,29 +2418,17 @@ const HandsontableWorkbook = React.forwardRef<
 
   const afterMergeCells = React.useCallback(() => {
     if (!readOnly) {
-      const idx = activeSheetIndexRef.current;
       scheduleUndoRedoRefresh();
-      setTimeout(() => collectCurrentSheetFromHot(true, idx), 0);
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
-  }, [
-    readOnly,
-    activeSheetIndexRef,
-    collectCurrentSheetFromHot,
-    scheduleUndoRedoRefresh,
-  ]);
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterUnmergeCells = React.useCallback(() => {
     if (!readOnly) {
-      const idx = activeSheetIndexRef.current;
       scheduleUndoRedoRefresh();
-      setTimeout(() => collectCurrentSheetFromHot(true, idx), 0);
+      setTimeout(() => collectCurrentSheetFromHot(true), 0);
     }
-  }, [
-    readOnly,
-    activeSheetIndexRef,
-    collectCurrentSheetFromHot,
-    scheduleUndoRedoRefresh,
-  ]);
+  }, [readOnly, collectCurrentSheetFromHot, scheduleUndoRedoRefresh]);
 
   const afterCreateRow = React.useCallback(() => {
     rowStructureDirtyRef.current.set(activeSheetIndexRef.current, true);
@@ -2513,10 +2487,9 @@ const HandsontableWorkbook = React.forwardRef<
           hf.setCellContents({ sheet: sheetId, row, col }, [[valueText]]);
         }
       }
-      // FIX (BUG 1): Removed the fake `hf.rebuildAndRecalculate()` call that
-      // was here. HyperFormula has no such method — setCellContents already
-      // triggers automatic recalculation. The duck-typed call was a no-op that
-      // would silently break if HF ever added a method with that name.
+      if (typeof (hf as any).rebuildAndRecalculate === "function") {
+        (hf as any).rebuildAndRecalculate();
+      }
       sheet.cellMeta = dedupeCellMetaByCoordinate([...metaByKey.values()]);
       setSheetCellMetaFromList(sheet.name || `Sheet${sheetIndex + 1}`, sheet.cellMeta);
       const updatesBySheet = refreshFormulaDisplays();
@@ -2527,9 +2500,7 @@ const HandsontableWorkbook = React.forwardRef<
         hot.render();
       }
     },
-    // FIX (BUG 3): Added setSheetCellMetaFromList to the dependency array.
-    // It was called inside but missing from deps, risking a stale closure.
-    [activeSheetIndexRef, workbookRef, refreshFormulaDisplays, hotRef, setSheetCellMetaFromList],
+    [activeSheetIndexRef, workbookRef, refreshFormulaDisplays, hotRef],
   );
 
   const { afterChange } = useWorkbookHotCallbacks({
@@ -2770,12 +2741,10 @@ const HandsontableWorkbook = React.forwardRef<
       renderAllRows: readOnly,
       viewportRowRenderingOffset: lightweightPerformance ? 8 : 20,
       viewportColumnRenderingOffset: lightweightPerformance ? 4 : 10,
-      // FIX (BUG 4): Do NOT pass `formulas: undefined` explicitly. Omitting
-      // the key entirely is the correct way to prevent HOT from activating
-      // its built-in formula engine. An explicit `undefined` value can behave
-      // differently from omission in some HOT versions and interfere with
-      // plugin initialization. We manage formulas via our own HyperFormula
-      // instance to support cross-sheet references (e.g. 'CREW LIST'!C4).
+      // We run a workbook-wide HyperFormula instance manually for cross-sheet
+      // references. Enabling HOT's per-grid formulas plugin here causes
+      // cross-sheet refs (e.g. 'CREW LIST'!C4) to resolve as #REF!.
+      formulas: undefined,
       mergeCells:
         renderedMergeCells.length > 0 ? renderedMergeCells : !readOnly,
       filters: heavyPluginsEnabled,
@@ -2870,8 +2839,7 @@ const HandsontableWorkbook = React.forwardRef<
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
-      // FIX (BUG 4): Removed shouldUseFormulaEngine from deps — it was only
-      // used for the now-removed `formulas: undefined` setting.
+      shouldUseFormulaEngine,
       renderedMergeCells,
       heavyPluginsEnabled,
       hotTableContextMenu,
@@ -3282,19 +3250,10 @@ const HandsontableWorkbook = React.forwardRef<
                     if (e.key === "Enter") {
                       const n = renameValue.trim();
                       if (!n) return;
-                      // FIX (BUG 8a): Capture the old sheet name before
-                      // renaming so we can migrate cellMetaRef to the new key.
-                      const oldName = activeSheet?.name || `Sheet${activeSheetIndex + 1}`;
                       const next = safeSheets.map((s, i) =>
                         i === activeSheetIndex ? { ...s, name: n } : s,
                       );
                       workbookRef.current.sheets = next;
-                      // Migrate cellMetaRef data from old name to new name so
-                      // formatting/fillable state isn't lost after a rename.
-                      if (oldName !== n && cellMetaRef.current[oldName]) {
-                        cellMetaRef.current[n] = cellMetaRef.current[oldName];
-                        delete cellMetaRef.current[oldName];
-                      }
                       setSheetTabs(
                         next.map((s) => ({
                           name: s.name,
@@ -3316,18 +3275,10 @@ const HandsontableWorkbook = React.forwardRef<
                   onClick={() => {
                     const n = renameValue.trim();
                     if (!n) return;
-                    // FIX (BUG 8b): Same cellMetaRef migration for the Save button.
-                    const oldName = activeSheet?.name || `Sheet${activeSheetIndex + 1}`;
                     const next = safeSheets.map((s, i) =>
                       i === activeSheetIndex ? { ...s, name: n } : s,
                     );
                     workbookRef.current.sheets = next;
-                    // Migrate cellMetaRef data from old name to new name so
-                    // formatting/fillable state isn't lost after a rename.
-                    if (oldName !== n && cellMetaRef.current[oldName]) {
-                      cellMetaRef.current[n] = cellMetaRef.current[oldName];
-                      delete cellMetaRef.current[oldName];
-                    }
                     setSheetTabs(
                       next.map((s) => ({ name: s.name, tabColor: s.tabColor })),
                     );
@@ -3391,13 +3342,6 @@ const HandsontableWorkbook = React.forwardRef<
               </Button>
             )}
 
-            <TB
-              onClick={deleteActiveSheet}
-              title="Delete active sheet"
-              disabled={safeSheets.length <= 1}
-            >
-              🗑 Delete
-            </TB>
             <TB onClick={duplicateActiveSheet} title="Duplicate active sheet">
               ⧉ Duplicate
             </TB>
@@ -3460,7 +3404,7 @@ const HandsontableWorkbook = React.forwardRef<
         )}
         <div style={hotTableScaleStyle}>
           <HotTable
-            key={`ht-wb-${hotTableMountKey}`}
+            key={`ht-wb-${activeSheetIndex}-${hotTableMountKey}`}
             ref={hotRef}
             {...hotTableSettings}
             manualColumnResize={!readOnly && !lightweightPerformance}

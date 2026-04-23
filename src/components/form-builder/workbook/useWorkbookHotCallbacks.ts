@@ -47,8 +47,16 @@ export const useWorkbookHotCallbacks = ({
 
   const afterChange = React.useCallback(
     (changes: any, source: string) => {
+      // Capture sheet index BEFORE the setTimeout so we know which
+      // sheet this change belonged to when the callback fires.
       const changeSheetIndex = activeSheetIndexRef.current;
+
       setTimeout(() => {
+        // GUARD: If the user switched sheets while this timer was pending,
+        // the change belonged to the previous sheet's HOT instance.
+        // Writing it now would corrupt the currently visible sheet's data.
+        if (activeSheetIndexRef.current !== changeSheetIndex) return;
+
         if (source === "loadData") return;
         const hot = hotRef.current?.hotInstance;
         const userDrivenSource = isUserDrivenChangeSource(source);
@@ -131,17 +139,12 @@ export const useWorkbookHotCallbacks = ({
             };
             readOnlyPreviewDirtyRef.current = true;
             if (source === "edit") {
-              // Keep local workbook state in sync during typing, but do not emit
-              // to parent until editing has ended.
               pendingReadOnlyEmitRef.current = true;
               return;
             }
             const isEditorStillOpen =
               typeof hot?.isEditorOpened === "function" &&
               hot.isEditorOpened();
-            // Defer all parent syncs until a dedicated "editing finished" phase.
-            // This prevents focus/caret jumps when imported templates emit mixed
-            // change sources while users are still typing.
             pendingReadOnlyEmitRef.current = true;
             if (!isEditorStillOpen && !isEditingRef.current) {
               onReadOnlyEdit?.();
