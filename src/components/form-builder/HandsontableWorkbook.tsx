@@ -480,10 +480,7 @@ const HandsontableWorkbook = React.forwardRef<
       : EMPTY_GRID_PLACEHOLDER;
   const previewRows = safeGrid.length;
   const previewCols = safeGrid[0]?.length || 0;
-  const renderedGrid = React.useMemo(() => {
-    if (!readOnly) return safeGrid;
-    return safeGrid;
-  }, [readOnly, safeGrid, previewRows, previewCols]);
+  const renderedGrid = safeGrid;
 
   const isPreviewTruncated = false;
 
@@ -881,15 +878,14 @@ const HandsontableWorkbook = React.forwardRef<
         workbookRef.current.sheets[idx] ||
         ({ name: `Sheet${idx + 1}` } as SheetData);
       const targetSheetName = targetSheet.name || `Sheet${idx + 1}`;
-      let cellMeta = getSheetCellMetaList(targetSheetName);
-      if ((!cellMeta || cellMeta.length === 0) && Array.isArray(targetSheet.cellMeta)) {
-        cellMeta = dedupeCellMetaByCoordinate(targetSheet.cellMeta);
-      }
+      let cellMeta: NonNullable<SheetData["cellMeta"]>;
       if (includeMeta) {
         cellMeta = getSheetCellMetaList(targetSheetName);
         if ((!cellMeta || cellMeta.length === 0) && Array.isArray(targetSheet.cellMeta)) {
           cellMeta = dedupeCellMetaByCoordinate(targetSheet.cellMeta);
         }
+      } else {
+        cellMeta = targetSheet.cellMeta || [];
       }
       const hf = hfRef.current;
       const sheetId = hf?.getSheetId(targetSheetName);
@@ -1054,11 +1050,12 @@ const HandsontableWorkbook = React.forwardRef<
       }
       if (checkboxCoords.size > 0) {
         let fallbackChanged = false;
-        const fallbackGrid = sheet.grid.map((row) => {
+        const fallbackGrid = sheet.grid.map((row, r) => {
           if (!Array.isArray(row)) return row;
           let rowChanged = false;
           const nextRow = [...row];
           for (let c = 0; c < row.length; c++) {
+            if (!checkboxCoords.has(cellCoordKey(r, c))) continue;
             const raw = row[c];
             const normalizedRaw = String(raw ?? "")
               .trim()
@@ -1971,11 +1968,7 @@ const HandsontableWorkbook = React.forwardRef<
     if (sheetCountChanged) {
       setActiveSheetIndex(0);
       const first = nextSheets[0]?.grid?.length ? nextSheets[0].grid : [[""]];
-      if (!readOnly) {
-        setInitialGrid(cloneEditableGrid(first));
-      } else {
-        setInitialGrid(cloneEditableGrid(first));
-      }
+      setInitialGrid(cloneEditableGrid(first));
     } else {
       setActiveSheetIndex((prev) =>
         Math.min(prev, Math.max(0, nextSheets.length - 1)),
