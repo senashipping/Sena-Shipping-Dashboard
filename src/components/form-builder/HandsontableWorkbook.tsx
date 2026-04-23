@@ -1905,6 +1905,22 @@ const HandsontableWorkbook = React.forwardRef<
 
   // ─── sheet management ────────────────────────────────────────────────────────
 
+  const deleteActiveSheet = () => {
+    const sheets = workbookRef.current.sheets;
+    if (sheets.length <= 1) return;
+    const idx = activeSheetIndexRef.current;
+    const nextSheets = sheets.filter((_, i) => i !== idx);
+    workbookRef.current.sheets = nextSheets;
+    setSheetTabs(nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })));
+    const nextIdx = Math.min(idx, nextSheets.length - 1);
+    const nextSheet = nextSheets[nextIdx];
+    setInitialGrid(toVisibleGrid(nextSheet));
+    setActiveSheetIndex(nextIdx);
+    if (!readOnly) {
+      emitWorkbookToParent();
+    }
+  };
+
   const duplicateActiveSheet = () => {
     if (!readOnly) collectCurrentSheetFromHot(true);
     const idx = activeSheetIndexRef.current;
@@ -3378,6 +3394,13 @@ const HandsontableWorkbook = React.forwardRef<
             </TB>
             <TB onClick={() => moveSheet("right")} title="Move sheet right">
               Move →
+            </TB>
+            <TB
+              onClick={deleteActiveSheet}
+              title="Delete active sheet"
+              disabled={sheetTabs.length <= 1}
+            >
+              🗑 Delete Sheet
             </TB>
 
             {!readOnly && (
