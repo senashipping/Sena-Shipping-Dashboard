@@ -898,15 +898,9 @@ const HandsontableWorkbook = React.forwardRef<
           ) {
             continue;
           }
-          const value = hf.getCellValue({
-            sheet: sheetId,
-            row: meta.row,
-            col: meta.col,
-          });
-          const display = toFormulaDisplayValue(value);
           while (nextGrid.length <= meta.row) nextGrid.push([]);
           if (!Array.isArray(nextGrid[meta.row])) nextGrid[meta.row] = [];
-          nextGrid[meta.row][meta.col] = display ?? "";
+          nextGrid[meta.row][meta.col] = formula;
         }
       }
 
@@ -1297,16 +1291,10 @@ const HandsontableWorkbook = React.forwardRef<
             !_meta.formula.startsWith("=")
           )
             continue;
-          const _value = _hf.getCellValue({
-            sheet: _sheetId,
-            row: _meta.row,
-            col: _meta.col,
-          });
-          const _display = toFormulaDisplayValue(_value);
           while (_evaluatedGrid.length <= _meta.row) _evaluatedGrid.push([]);
           if (!Array.isArray(_evaluatedGrid[_meta.row]))
             _evaluatedGrid[_meta.row] = [];
-          _evaluatedGrid[_meta.row][_meta.col] = _display ?? "";
+          _evaluatedGrid[_meta.row][_meta.col] = _meta.formula;
         }
       }
     }
