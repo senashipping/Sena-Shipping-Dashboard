@@ -480,8 +480,6 @@ const HandsontableWorkbook = React.forwardRef<
       : EMPTY_GRID_PLACEHOLDER;
   const previewRows = safeGrid.length;
   const previewCols = safeGrid[0]?.length || 0;
-  const renderedGrid = safeGrid;
-
   const isPreviewTruncated = false;
 
   const lastMergeSigRef = React.useRef<string>("");
@@ -558,29 +556,8 @@ const HandsontableWorkbook = React.forwardRef<
     if (dialog) setMenuContainer(dialog);
   }, []);
 
-  const hotTableZoom = React.useMemo(
-    () => 1,
-    [readOnly, hotViewportWidth, renderedGrid, renderedColWidths],
-  );
+  const hotTableScaleStyle: React.CSSProperties = {};
 
-  const hotTableScaleStyle = React.useMemo<React.CSSProperties>(() => {
-    if (hotTableZoom >= 0.999) return {};
-    return {
-      transform: `scaleX(${hotTableZoom})`,
-      transformOrigin: "top left",
-      width: `${100 / hotTableZoom}%`,
-    };
-  }, [hotTableZoom]);
-
-  const currentCellCount = React.useMemo(
-    () =>
-      renderedGrid.reduce(
-        (t, row) => t + (Array.isArray(row) ? row.length : 0),
-        0,
-      ),
-    [renderedGrid],
-  );
-  const shouldUseFormulaEngine = currentCellCount <= 20000;
 
   const [isHotLoading, setIsHotLoading] = React.useState(false);
 
@@ -1052,30 +1029,6 @@ const HandsontableWorkbook = React.forwardRef<
 
       if (gridChanged) {
         sheet.grid = nextGrid;
-      }
-      if (checkboxCoords.size > 0) {
-        let fallbackChanged = false;
-        const fallbackGrid = sheet.grid.map((row, r) => {
-          if (!Array.isArray(row)) return row;
-          let rowChanged = false;
-          const nextRow = [...row];
-          for (let c = 0; c < row.length; c++) {
-            if (!checkboxCoords.has(cellCoordKey(r, c))) continue;
-            const raw = row[c];
-            const normalizedRaw = String(raw ?? "")
-              .trim()
-              .toLowerCase();
-            if (normalizedRaw === "false") {
-              nextRow[c] = "";
-              rowChanged = true;
-              fallbackChanged = true;
-            }
-          }
-          return rowChanged ? nextRow : row;
-        });
-        if (fallbackChanged) {
-          sheet.grid = fallbackGrid;
-        }
       }
     },
     [],
@@ -1921,25 +1874,86 @@ const HandsontableWorkbook = React.forwardRef<
     }
   };
 
-  const duplicateActiveSheet = () => {
-    if (!readOnly) collectCurrentSheetFromHot(true);
-    const idx = activeSheetIndexRef.current;
-    const source = workbookRef.current.sheets[idx];
-    if (!source) return;
-    const cloned = JSON.parse(JSON.stringify(source)) as SheetData;
-    cloned.name = `${source.name} Copy`;
-    const nextSheets = [...workbookRef.current.sheets, cloned];
-    workbookRef.current.sheets = nextSheets;
-    setSheetCellMetaFromList(
-      cloned.name || `Sheet${nextSheets.length}`,
-      cloned.cellMeta || [],
-    );
-    setSheetTabs(
-      nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
-    );
-    setInitialGrid(toVisibleGrid(nextSheets[nextSheets.length - 1]));
-    setActiveSheetIndex(nextSheets.length - 1);
-  };
+const duplicateActiveSheet = () => {
+  if (!readOnly) collectCurrentSheetFromHot(true);
+  const idx = activeSheetIndexRef.current;
+  const source = workbookRef.current.sheets[idx];
+  if (!source) return;
+
+  const cloned = deepCloneSheet(source);
+  const existingNames = new Set(workbookRef.current.sheets.map((s) => s.name));
+  const baseName = `${source.name} Copy`;
+  let uniqueName = baseName;
+  let counter = 2;
+  while (existingNames.has(uniqueName)) {
+    uniqueName = `${baseName} (${counter++})`;
+  }
+  cloned.name = uniqueName;
+  const nextSheets = [...workbookRef.current.sheets, cloned];
+  workbookRef.current.sheets = nextSheets;
+
+  setSheetCellMetaFromList(
+    cloned.name || `Sheet${nextSheets.length}`,
+    cloned.cellMeta || [],
+  );
+
+  const hf = hfRef.current;
+  let newSheetId: number | undefined;
+  if (hf) {
+    hf.addSheet(cloned.name || `Sheet${nextSheets.length}`);
+    newSheetId = hf.getSheetId(cloned.name || `Sheet${nextSheets.length}`);
+    if (newSheetId != null) {
+      const rows = cloned.grid?.length || 0;
+      const cols = Math.max(
+        1,
+        ...(cloned.grid || []).map((r) => (Array.isArray(r) ? r.length : 0)),
+      );
+      const metaByKey = new Map(
+        (cloned.cellMeta || []).map((m) => [cellCoordKey(m.row, m.col), m]),
+      );
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const formula = metaByKey.get(cellCoordKey(r, c))?.formula;
+          const val = formula ?? cloned.grid?.[r]?.[c] ?? "";
+          if (val) {
+            hf.setCellContents(
+              { sheet: newSheetId, row: r, col: c },
+              [[val]],
+            );
+          }
+        }
+      }
+    }
+  }
+
+  const targetSheet = nextSheets[nextSheets.length - 1];
+  const evaluatedGrid = toVisibleGrid(targetSheet);
+  if (hf && newSheetId != null) {
+    for (const meta of cloned.cellMeta || []) {
+      if (
+        typeof meta?.formula !== "string" ||
+        !meta.formula.startsWith("=")
+      )
+        continue;
+      const value = hf.getCellValue({
+        sheet: newSheetId,
+        row: meta.row,
+        col: meta.col,
+      });
+      const display = toFormulaDisplayValue(value);
+      while (evaluatedGrid.length <= meta.row) evaluatedGrid.push([]);
+      if (!Array.isArray(evaluatedGrid[meta.row]))
+        evaluatedGrid[meta.row] = [];
+      evaluatedGrid[meta.row][meta.col] = display ?? "";
+    }
+  }
+
+  setSheetTabs(
+    nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
+  );
+  setInitialGrid(evaluatedGrid);
+  setActiveSheetIndex(nextSheets.length - 1);
+};
 
   const moveSheet = (direction: "left" | "right") => {
     if (!readOnly) collectCurrentSheetFromHot(true);
@@ -2174,10 +2188,8 @@ const HandsontableWorkbook = React.forwardRef<
             colIndex,
             prop,
             (() => {
-              const currentSheet =
-                workbookRef.current.sheets[activeSheetIndexRef.current];
-              const formulaMeta = getFormulaMeta(
-                currentSheet,
+              const formulaMeta = getCellMeta(
+                activeSheetName,
                 rowIndex,
                 colIndex,
               ) as CellMetaEntry | undefined;
@@ -2883,7 +2895,6 @@ const HandsontableWorkbook = React.forwardRef<
       stretchColumnsInPreview,
       readOnly,
       readOnlyHotHeight,
-      shouldUseFormulaEngine,
       renderedMergeCells,
       heavyPluginsEnabled,
       hotTableContextMenu,
