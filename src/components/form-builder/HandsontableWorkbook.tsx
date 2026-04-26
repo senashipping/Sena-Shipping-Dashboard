@@ -1380,6 +1380,7 @@ const HandsontableWorkbook = React.forwardRef<
         return;
       }
       readOnlyEmitDebounceTimerRef.current = null;
+      pendingReadOnlyEmitRef.current = false;
       emitWorkbookToParent();
     }, 120);
   }, [
@@ -1987,7 +1988,7 @@ const duplicateActiveSheet = () => {
     if (sig === lastIncomingSignatureRef.current) return;
 
     const hot = hotRef.current?.hotInstance;
-    if (readOnly && isEditingRef.current) return;
+    if (readOnly && (isEditingRef.current || pendingReadOnlyEmitRef.current)) return;
     if (hot && typeof hot.isEditorOpened === "function" && hot.isEditorOpened())
       return;
 
@@ -2045,7 +2046,7 @@ const duplicateActiveSheet = () => {
     const hot = hotRef.current?.hotInstance;
     const isEditorOpen =
       typeof hot?.isEditorOpened === "function" && hot.isEditorOpened();
-    if (readOnly && (isEditorOpen || isEditingRef.current)) {
+    if (readOnly && (isEditorOpen || isEditingRef.current || pendingReadOnlyEmitRef.current)) {
       pendingIncomingReloadRef.current = true;
       pendingIncomingReloadSheetIndexRef.current = activeSheetIndex;
       pendingIncomingReloadWorkbookKeyRef.current = incomingWorkbookKey;
@@ -2575,8 +2576,13 @@ const duplicateActiveSheet = () => {
 
   const flushPendingPreviewSyncs = React.useCallback(() => {
     if (pendingReadOnlyEmitRef.current) {
-      pendingReadOnlyEmitRef.current = false;
       scheduleReadOnlyEmit();
+      // Discard the pending reload — after the emit+parent roundtrip, any still-needed
+      // reload will be triggered naturally by incomingWorkbookKey changing again.
+      pendingIncomingReloadRef.current = false;
+      pendingIncomingReloadSheetIndexRef.current = null;
+      pendingIncomingReloadWorkbookKeyRef.current = null;
+      return;
     }
     if (pendingIncomingReloadRef.current) {
       const pendingSheetIndex =
@@ -2817,7 +2823,7 @@ const duplicateActiveSheet = () => {
       manualColumnFreeze: !readOnly,
       autoColumnSize: false,
       autoRowSize: false,
-      fillHandle: !readOnly,
+      fillHandle: !disableEditorCompletely,
       fixedRowsTop: 0,
       fixedColumnsStart: 0,
       contextMenu: hotTableContextMenu,
