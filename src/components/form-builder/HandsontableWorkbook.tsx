@@ -1,4 +1,5 @@
 import React from "react";
+import ReactDOM from "react-dom";
 import { HotTable } from "@handsontable/react";
 import "handsontable/styles/handsontable.css";
 import "handsontable/styles/ht-theme-main.css";
@@ -262,6 +263,40 @@ const TB = ({
   </Button>
 );
 
+// ─── autofill helpers ────────────────────────────────────────────────────────
+
+function arithStep(nums: number[]): number | null {
+  if (nums.length < 2) return null;
+  const s = nums[1] - nums[0];
+  for (let i = 2; i < nums.length; i++) {
+    if (Math.abs(nums[i] - nums[i - 1] - s) > 1e-9) return null;
+  }
+  return s;
+}
+
+function fillSeriesValue(srcVals: string[], idx: number, reverse: boolean): string {
+  if (!srcVals.length) return "";
+  const nums = srcVals.map(Number);
+  const allNum = srcVals.every((v) => v !== "" && isFinite(Number(v)));
+  if (allNum) {
+    const step = arithStep(nums) ?? 1;
+    const base = reverse ? nums[0] : nums[nums.length - 1];
+    return String(base + step * (reverse ? -(idx + 1) : idx + 1));
+  }
+  const len = srcVals.length;
+  const safeIdx = ((reverse ? len - 1 - (idx % len) : idx % len) + len) % len;
+  return srcVals[safeIdx] ?? "";
+}
+
+type AutofillInfoState = {
+  srcFromRow: number; srcFromCol: number; srcToRow: number; srcToCol: number;
+  tgtFromRow: number; tgtFromCol: number; tgtToRow: number; tgtToCol: number;
+  direction: string;
+  sourceValues: string[][];
+  sourceClassNames: string[][];
+  iconTop: number; iconLeft: number;
+};
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const HandsontableWorkbook = React.forwardRef<
@@ -394,6 +429,19 @@ const HandsontableWorkbook = React.forwardRef<
   const [menuContainer, setMenuContainer] = React.useState<HTMLElement | null>(
     null,
   );
+
+  // ─── autofill popup ──────────────────────────────────────────────────────
+  const autofillInfoRef = React.useRef<AutofillInfoState | null>(null);
+  const [autofillInfo, setAutofillInfoState] = React.useState<AutofillInfoState | null>(null);
+  const [autofillMenuOpen, setAutofillMenuOpen] = React.useState(false);
+  const autofillMenuRef = React.useRef<HTMLDivElement>(null);
+
+  const dismissAutofillPopup = React.useCallback(() => {
+    autofillInfoRef.current = null;
+    setAutofillInfoState(null);
+    setAutofillMenuOpen(false);
+  }, []);
+
   const disableEditorCompletely = readOnly && strictViewOnly;
   const canUseReadOnlyWorkbookActions =
     readOnly && !strictViewOnly && allowReadOnlyWorkbookActions;
@@ -2506,6 +2554,163 @@ const duplicateActiveSheet = () => {
     scheduleUndoRedoRefresh();
   }, [scheduleUndoRedoRefresh]);
 
+  const afterAutofill = React.useCallback(
+    (_fillData: any, sourceRange: any, targetRange: any, direction: string) => {
+      if (disableEditorCompletely) return;
+      const hot = hotRef.current?.hotInstance;
+      if (!hot) return;
+      const srcFrom = sourceRange?.from;
+      const srcTo = sourceRange?.to;
+      const tgtFrom = targetRange?.from;
+      const tgtTo = targetRange?.to;
+      if (!srcFrom || !srcTo || !tgtFrom || !tgtTo) return;
+
+      // Capture source values and classNames (source cells are NOT modified by autofill)
+      const sourceValues: string[][] = [];
+      const sourceClassNames: string[][] = [];
+      for (let r = srcFrom.row; r <= srcTo.row; r++) {
+        const vRow: string[] = [];
+        const cRow: string[] = [];
+        for (let c = srcFrom.col; c <= srcTo.col; c++) {
+          vRow.push(String(hot.getDataAtCell(r, c) ?? ""));
+          cRow.push(String(hot.getCellMeta(r, c)?.className || ""));
+        }
+        sourceValues.push(vRow);
+        sourceClassNames.push(cRow);
+      }
+
+      const bottomRow = Math.max(srcFrom.row, srcTo.row, tgtFrom.row, tgtTo.row);
+      const bottomCol = Math.max(srcFrom.col, srcTo.col, tgtFrom.col, tgtTo.col);
+
+      // Wait one frame for HOT to finish rendering the filled cells
+      requestAnimationFrame(() => {
+        const h = hotRef.current?.hotInstance;
+        const wrapper = hotViewportRef.current;
+        if (!h || !wrapper) return;
+        const td = h.getCell(bottomRow, bottomCol) as HTMLTableCellElement | null;
+        if (!td) return;
+        const wRect = wrapper.getBoundingClientRect();
+        const tRect = td.getBoundingClientRect();
+        const info: AutofillInfoState = {
+          srcFromRow: srcFrom.row, srcFromCol: srcFrom.col,
+          srcToRow: srcTo.row, srcToCol: srcTo.col,
+          tgtFromRow: tgtFrom.row, tgtFromCol: tgtFrom.col,
+          tgtToRow: tgtTo.row, tgtToCol: tgtTo.col,
+          direction: String(direction || "down"),
+          sourceValues,
+          sourceClassNames,
+          iconTop: tRect.bottom - wRect.top + 4,
+          iconLeft: tRect.right - wRect.left - 22,
+        };
+        autofillInfoRef.current = info;
+        setAutofillInfoState(info);
+        setAutofillMenuOpen(false);
+      });
+    },
+    [disableEditorCompletely],
+  );
+
+  const applyAutofillMode = React.useCallback(
+    (mode: "copy" | "series" | "formatting" | "values") => {
+      const info = autofillInfoRef.current;
+      if (!info) return;
+      // Dismiss before undo/setData so afterChange doesn't re-dismiss
+      autofillInfoRef.current = null;
+      setAutofillInfoState(null);
+      setAutofillMenuOpen(false);
+
+      if (mode === "values") return; // HOT default — values filled, no className. Nothing to do.
+
+      const hot = hotRef.current?.hotInstance;
+      if (!hot) return;
+
+      const {
+        tgtFromRow, tgtFromCol, tgtToRow, tgtToCol,
+        direction, sourceValues, sourceClassNames,
+      } = info;
+
+      const tgtRowCount = tgtToRow - tgtFromRow + 1;
+      const tgtColCount = tgtToCol - tgtFromCol + 1;
+      const srcRows = sourceValues.length;
+      const srcCols = sourceValues[0]?.length || 1;
+
+      const getSrcVal = (relR: number, relC: number) =>
+        sourceValues[relR % srcRows]?.[relC % srcCols] ?? "";
+      const getSrcCls = (relR: number, relC: number) =>
+        sourceClassNames[relR % srcRows]?.[relC % srcCols] ?? "";
+
+      // Modes that need the pre-fill state: undo HOT's autofill first
+      if (mode === "series" || mode === "formatting") {
+        const ur = hot.getPlugin?.("undoRedo");
+        if (ur && typeof ur.undo === "function") ur.undo();
+      }
+
+      if (mode === "series") {
+        const isVert = direction === "down" || direction === "up";
+        const isRev = direction === "up" || direction === "left";
+        const changes: Array<[number, number, string]> = [];
+        for (let r = 0; r < tgtRowCount; r++) {
+          for (let c = 0; c < tgtColCount; c++) {
+            let val: string;
+            if (isVert) {
+              const colIdx = c % srcCols;
+              const colVals = sourceValues.map((row) => row[colIdx] ?? "");
+              val = fillSeriesValue(colVals, isRev ? tgtRowCount - 1 - r : r, isRev);
+            } else {
+              const rowIdx = r % srcRows;
+              const rowVals = sourceValues[rowIdx] || [];
+              val = fillSeriesValue(rowVals, isRev ? tgtColCount - 1 - c : c, isRev);
+            }
+            changes.push([tgtFromRow + r, tgtFromCol + c, val]);
+          }
+        }
+        hot.setDataAtCell(changes);
+      } else if (mode === "copy") {
+        // Strict cycle of source values (overrides HOT's series detection for numbers)
+        const changes: Array<[number, number, string]> = [];
+        for (let r = 0; r < tgtRowCount; r++) {
+          for (let c = 0; c < tgtColCount; c++) {
+            changes.push([tgtFromRow + r, tgtFromCol + c, getSrcVal(r, c)]);
+          }
+        }
+        hot.setDataAtCell(changes);
+      }
+
+      // Copy source className to target cells (for copy, series, formatting)
+      const applyMeta = () => {
+        for (let r = 0; r < tgtRowCount; r++) {
+          for (let c = 0; c < tgtColCount; c++) {
+            const cls = getSrcCls(r, c);
+            hot.setCellMeta(tgtFromRow + r, tgtFromCol + c, "className", cls);
+            setCellMeta(activeSheetName, tgtFromRow + r, tgtFromCol + c, {
+              className: cls || undefined,
+            });
+          }
+        }
+      };
+      if (typeof hot.batch === "function") hot.batch(applyMeta);
+      else applyMeta();
+      hot.render();
+
+      if (!readOnly) {
+        collectCurrentSheetFromHot(true);
+        scheduleUndoRedoRefresh();
+      } else {
+        pendingReadOnlyEmitRef.current = true;
+        scheduleReadOnlyEmit();
+      }
+    },
+    [
+      activeSheetName,
+      readOnly,
+      setCellMeta,
+      collectCurrentSheetFromHot,
+      scheduleUndoRedoRefresh,
+      pendingReadOnlyEmitRef,
+      scheduleReadOnlyEmit,
+    ],
+  );
+
   const handleCellChanges = React.useCallback(
     (
       changes: [number, number, unknown, unknown][],
@@ -2646,6 +2851,19 @@ const duplicateActiveSheet = () => {
 
   const afterChangeWithEditTracking = React.useCallback(
     (changes: any, source: string) => {
+      // Dismiss the autofill popup when any subsequent unrelated change fires
+      if (
+        autofillInfoRef.current !== null &&
+        source !== "afterAutofill" &&
+        source !== "Autofill.fill" &&
+        source !== "loadData" &&
+        source !== "yesNoSync" &&
+        source !== "formulaSync"
+      ) {
+        autofillInfoRef.current = null;
+        setAutofillInfoState(null);
+        setAutofillMenuOpen(false);
+      }
       afterChange(changes, source);
       if (!readOnly) return;
       if (source === "afterAutofill" || source === "Autofill.fill") {
@@ -2756,6 +2974,17 @@ const duplicateActiveSheet = () => {
     },
     [readOnly, safeGrid, syncToolbarFromCell],
   );
+
+  // Dismiss autofill popup on click outside the popup menu
+  React.useEffect(() => {
+    if (!autofillInfo) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (autofillMenuRef.current?.contains(e.target as Node)) return;
+      dismissAutofillPopup();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [autofillInfo, dismissAutofillPopup]);
 
   const hotTableContextMenu = React.useMemo<any>(() => {
     if (readOnly) return false;
@@ -2907,6 +3136,7 @@ const duplicateActiveSheet = () => {
       afterCreateCol,
       afterRemoveRow,
       afterRemoveCol,
+      afterAutofill: disableEditorCompletely ? undefined : afterAutofill,
     }),
     [
       initialGrid,
@@ -2937,6 +3167,7 @@ const duplicateActiveSheet = () => {
       afterCreateCol,
       afterRemoveRow,
       afterRemoveCol,
+      afterAutofill,
     ],
   );
 
@@ -3501,6 +3732,71 @@ const duplicateActiveSheet = () => {
           {previewCols} for stability.
         </div>
       )}
+
+      {/* ── Autofill options popup (portal so it escapes overflow:hidden) ── */}
+      {autofillInfo &&
+        typeof document !== "undefined" &&
+        ReactDOM.createPortal(
+          <div
+            ref={autofillMenuRef}
+            style={{ position: "fixed", top: autofillInfo.iconTop, left: autofillInfo.iconLeft, zIndex: 9999 }}
+          >
+            {/* Trigger icon */}
+            <button
+              type="button"
+              title="Autofill Options"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20,
+                background: "#fff", border: "1px solid #9ca3af",
+                borderRadius: 2, cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,.15)",
+                padding: 0, fontSize: 11,
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setAutofillMenuOpen((v) => !v)}
+            >
+              <span style={{ lineHeight: 1, userSelect: "none" }}>⊞</span>
+            </button>
+
+            {/* Dropdown */}
+            {autofillMenuOpen && (
+              <div
+                style={{
+                  position: "absolute", top: 22, left: 0,
+                  background: "#fff", border: "1px solid #d1d5db",
+                  borderRadius: 4, boxShadow: "0 4px 12px rgba(0,0,0,.15)",
+                  minWidth: 192, zIndex: 10000, padding: "4px 0",
+                }}
+              >
+                {(
+                  [
+                    { label: "Copy Cells",              mode: "copy"       },
+                    { label: "Fill Series",             mode: "series"     },
+                    { label: "Fill Formatting Only",    mode: "formatting" },
+                    { label: "Fill Without Formatting", mode: "values"     },
+                  ] as const
+                ).map(({ label, mode }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      width: "100%", padding: "6px 12px",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontSize: 13, textAlign: "left", color: "#111827",
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#eff6ff"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}
+                    onClick={() => applyAutofillMode(mode)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 });
