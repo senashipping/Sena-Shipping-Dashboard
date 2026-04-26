@@ -646,11 +646,6 @@ const HandsontableWorkbook = React.forwardRef<
     }, 300);
   }, [refreshUndoRedoState]);
 
-  const getFormulaMeta = React.useCallback(
-    (sheet: SheetData | undefined, row: number, col: number) =>
-      (sheet?.cellMeta || []).find((m) => m.row === row && m.col === col),
-    [],
-  );
 
   const initializeHyperFormula = React.useCallback(() => {
     hfRef.current?.destroy();
@@ -741,8 +736,12 @@ const HandsontableWorkbook = React.forwardRef<
   const syncToolbarFromCell = React.useCallback(
     (hot: any, row: number, col: number) => {
       const v = hot.getDataAtCell(row, col);
-      const sheet = workbookRef.current.sheets[activeSheetIndexRef.current];
-      const formula = getFormulaMeta(sheet, row, col)?.formula;
+      const sheetIdx = activeSheetIndexRef.current;
+      const sheetName =
+        workbookRef.current.sheets[sheetIdx]?.name || `Sheet${sheetIdx + 1}`;
+      const formula = (getCellMeta(sheetName, row, col) as any)?.formula as
+        | string
+        | undefined;
       setFormulaInput(formula ?? (v == null ? "" : String(v)));
 
       const cls = String(hot.getCellMeta(row, col)?.className || "");
@@ -785,7 +784,7 @@ const HandsontableWorkbook = React.forwardRef<
         setSelectedVAlign("bottom");
       else setSelectedVAlign(null);
     },
-    [getFormulaMeta],
+    [getCellMeta],
   );
 
   // ─── sheet sync ────────────────────────────────────────────────────────────
@@ -1792,8 +1791,21 @@ const HandsontableWorkbook = React.forwardRef<
     if (!hot || (readOnly && !canUseReadOnlyWorkbookActions)) return;
     const range = getToolbarActionRange(hot);
     if (!range) return;
-    hot.setDataAtCell(range.startRow, range.startCol, formulaInput);
-    collectCurrentSheetFromHot(false);
+    const isSingleCell =
+      range.startRow === range.endRow && range.startCol === range.endCol;
+    if (isSingleCell) {
+      hot.setDataAtCell(range.startRow, range.startCol, formulaInput);
+    } else {
+      const changes: Array<[number, number, string]> = [];
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          changes.push([r, c, formulaInput]);
+        }
+      }
+      hot.setDataAtCell(changes);
+    }
+    collectCurrentSheetFromHot(true);
+    scheduleUndoRedoRefresh();
     restoreHotRange(hot, range);
   };
 
