@@ -2064,8 +2064,16 @@ const duplicateActiveSheet = () => {
         mergeFillableMetaFromPrevSheet(prevSheets[i], inc),
       ),
     };
-    for (const s of workbookRef.current.sheets) {
-      setSheetCellMetaFromList(s.name || "Sheet", s.cellMeta || []);
+    // When suppressNextHotReloadRef is true the incoming data is a parent-roundtrip
+    // echo of our own edit. The incoming cellMeta has stale formulaCachedValues (it
+    // comes from the template, not from HyperFormula). Writing those stale values
+    // into cellMetaRef now would make HOT re-render formula cells with old results.
+    // Effect 2118 (initializeHyperFormula + refreshFormulaDisplays) will recompute
+    // the correct values and sync cellMetaRef immediately after, so skip here.
+    if (!suppressNextHotReloadRef.current) {
+      for (const s of workbookRef.current.sheets) {
+        setSheetCellMetaFromList(s.name || "Sheet", s.cellMeta || []);
+      }
     }
     setSheetTabs(
       nextSheets.map((s) => ({ name: s.name, tabColor: s.tabColor })),
