@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import {
   SINGLE_CHECKBOX_CLASS,
   YES_NO_PAIR_TOKEN_PREFIX,
+  toCheckboxChecked,
 } from "../form-builder/workbook/workbookUtils";
 
 /** Persisted workbook shape (matches builder / submission payload). */
@@ -110,9 +111,11 @@ function isEmptyRow(
   return true;
 }
 
-/** Returns "✓" when the raw cell value matches its checkedTemplate, "" otherwise. */
+/** Returns "✓" when the raw cell value is checked, "" otherwise.
+ *  Falls back to toCheckboxChecked for legacy boolean-as-string values ("true"/"false")
+ *  stored before proper template normalization. */
 function checkboxDisplayValue(raw: string, checkedTemplate: string): string {
-  return raw === checkedTemplate ? "✓" : "";
+  return raw === checkedTemplate || toCheckboxChecked(raw) ? "✓" : "";
 }
 
 function toSafeGrid(raw: unknown): string[][] {
@@ -190,12 +193,21 @@ function normalizeSheet(
     const key = `${+m.row},${+m.col}`;
     if (cls.includes("meta-fillable")) fillable.add(key);
     const tokens = cls.split(/\s+/);
+    const isYesNoPair = tokens.some((t) => t.startsWith(YES_NO_PAIR_TOKEN_PREFIX));
     const isCheckbox =
-      tokens.some((t) => t.startsWith(YES_NO_PAIR_TOKEN_PREFIX)) ||
+      isYesNoPair ||
       tokens.includes(SINGLE_CHECKBOX_CLASS) ||
       String(m.type || "") === "checkbox";
-    if (isCheckbox && typeof m.checkedTemplate === "string") {
-      checkboxCells.set(key, { checkedTemplate: m.checkedTemplate });
+    if (isCheckbox) {
+      // Use stored checkedTemplate; fall back to type-appropriate default for
+      // older forms that were saved before checkedTemplate was persisted.
+      const checkedTemplate =
+        typeof m.checkedTemplate === "string"
+          ? m.checkedTemplate
+          : isYesNoPair
+            ? "YES"
+            : "true";
+      checkboxCells.set(key, { checkedTemplate });
     }
   }
   const imagesByKey = new Map<string, EmbeddedSheetImage>();
