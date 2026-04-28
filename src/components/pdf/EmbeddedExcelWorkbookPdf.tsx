@@ -1,5 +1,9 @@
 import React from "react";
 import { View, Text, Image, StyleSheet } from "@react-pdf/renderer";
+import {
+  SINGLE_CHECKBOX_CLASS,
+  YES_NO_PAIR_TOKEN_PREFIX,
+} from "../form-builder/workbook/workbookUtils";
 
 /** Persisted workbook shape (matches builder / submission payload). */
 export type EmbeddedExcelPdfSheet = {
@@ -38,6 +42,7 @@ const MAX_ROWS = 260;
 const MAX_COLS = 56;
 const ROW_MIN_PT = 13;
 const CELL_FONT = 6.5;
+const EMPTY_ROW_PT = 3; // collapsed height for rows with no content/fillable/merge
 
 const es = StyleSheet.create({
   sheetBlock: {
@@ -79,6 +84,44 @@ const es = StyleSheet.create({
   },
 });
 
+/** Returns true when the row has no content, no fillable cells, and no merge involvement. */
+function isEmptyRow(
+  r: number,
+  grid: string[][],
+  cols: number,
+  fillable: Set<string>,
+  merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>,
+): boolean {
+  const row = grid[r] || [];
+  for (let c = 0; c < cols; c++) {
+    if ((row[c] ?? "").trim() !== "") return false;
+    if (fillable.has(`${r},${c}`)) return false;
+  }
+  for (const m of merges) {
+    if (r >= m.row && r < m.row + m.rowspan) return false;
+  }
+  return true;
+}
+
+/** Convert raw checkbox cell values to a readable symbol for PDF. */
+function checkboxDisplayValue(
+  raw: string,
+  isYesNo: boolean,
+  isSingleOrType: boolean,
+): string {
+  if (isYesNo) {
+    if (raw === "YES") return "✓"; // ✓
+    if (raw === "NO" || raw === "") return "";
+    return raw;
+  }
+  if (isSingleOrType) {
+    if (raw === "true") return "✓"; // ✓
+    if (raw === "") return "";
+    return raw;
+  }
+  return raw;
+}
+
 function toSafeGrid(raw: unknown): string[][] {
   if (!Array.isArray(raw) || raw.length === 0) return [[""]];
   const rows = raw.map((row) =>
@@ -119,6 +162,8 @@ function clipMerges(
   return out;
 }
 
+type CheckboxCellInfo = { isYesNo: boolean; isSingleOrType: boolean };
+
 function normalizeSheet(
   sheet: EmbeddedExcelPdfSheet,
   index: number,
@@ -128,6 +173,7 @@ function normalizeSheet(
   merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>;
   fillable: Set<string>;
   imagesByKey: Map<string, EmbeddedSheetImage>;
+  checkboxCells: Map<string, CheckboxCellInfo>;
 } {
   const grid = toSafeGrid(sheet?.grid);
   const gridRows = grid.length;
@@ -144,10 +190,21 @@ function normalizeSheet(
     gridCols,
   );
   const fillable = new Set<string>();
+  const checkboxCells = new Map<string, CheckboxCellInfo>();
   for (const m of sheet?.cellMeta || []) {
     if (!m || !Number.isFinite(+m.row) || !Number.isFinite(+m.col)) continue;
     const cls = typeof m.className === "string" ? m.className : "";
-    if (cls.includes("meta-fillable")) fillable.add(`${+m.row},${+m.col}`);
+    const key = `${+m.row},${+m.col}`;
+    if (cls.includes("meta-fillable")) fillable.add(key);
+    const tokens = cls.split(/\s+/);
+    const isYesNo = tokens.some((t) => t.startsWith(YES_NO_PAIR_TOKEN_PREFIX));
+    const isSingleOrType =
+      !isYesNo &&
+      (tokens.includes(SINGLE_CHECKBOX_CLASS) ||
+        String((m as any).type || "") === "checkbox");
+    if (isYesNo || isSingleOrType) {
+      checkboxCells.set(key, { isYesNo, isSingleOrType });
+    }
   }
   const imagesByKey = new Map<string, EmbeddedSheetImage>();
   for (const im of sheet?.images || []) {
@@ -166,6 +223,7 @@ function normalizeSheet(
     merges,
     fillable,
     imagesByKey,
+    checkboxCells,
   };
 }
 
@@ -290,6 +348,7 @@ function SheetTable({
   merges,
   fillable,
   imagesByKey,
+  checkboxCells,
   truncated,
   startOnNewPage,
 }: {
@@ -298,6 +357,7 @@ function SheetTable({
   merges: NonNullable<EmbeddedExcelPdfSheet["mergeCells"]>;
   fillable: Set<string>;
   imagesByKey: Map<string, EmbeddedSheetImage>;
+  checkboxCells: Map<string, CheckboxCellInfo>;
   truncated: boolean;
   startOnNewPage?: boolean;
 }) {
@@ -309,6 +369,11 @@ function SheetTable({
 
   const body: React.ReactNode[] = [];
   for (let r = 0; r < rows; r++) {
+    if (isEmptyRow(r, grid, cols, fillable, merges)) {
+      body.push(<View key={`row-${r}`} style={{ height: EMPTY_ROW_PT }} />);
+      continue;
+    }
+
     const segments: React.ReactNode[] = [];
     let c = 0;
     while (c < cols) {
@@ -326,7 +391,11 @@ function SheetTable({
       const anch = mergeAt(r, c, merges);
       if (anch) {
         const w = (anch.colspan / cols) * 100;
-        const txt = grid[r]?.[c] ?? "";
+        const rawTxt = grid[r]?.[c] ?? "";
+        const cbInfo = checkboxCells.get(`${r},${c}`);
+        const txt = cbInfo
+          ? checkboxDisplayValue(rawTxt, cbInfo.isYesNo, cbInfo.isSingleOrType)
+          : rawTxt;
         const fill = fillable.has(`${r},${c}`);
         const img = imagesByKey.get(`${r},${c}`);
         segments.push(
@@ -352,7 +421,11 @@ function SheetTable({
         continue;
       }
       const w = (1 / cols) * 100;
-      const txt = grid[r]?.[c] ?? "";
+      const rawTxt = grid[r]?.[c] ?? "";
+      const cbInfo = checkboxCells.get(`${r},${c}`);
+      const txt = cbInfo
+        ? checkboxDisplayValue(rawTxt, cbInfo.isYesNo, cbInfo.isSingleOrType)
+        : rawTxt;
       const fill = fillable.has(`${r},${c}`);
       const img = imagesByKey.get(`${r},${c}`);
       segments.push(
@@ -456,6 +529,11 @@ export const EmbeddedExcelWorkbookPdf: React.FC<
           const [rs, cs] = k.split(",").map(Number);
           if (rs < gridRows && cs < gridCols) imgs.set(k, v);
         }
+        const cbCells = new Map<string, CheckboxCellInfo>();
+        for (const [k, v] of n.checkboxCells) {
+          const [rs, cs] = k.split(",").map(Number);
+          if (rs < gridRows && cs < gridCols) cbCells.set(k, v);
+        }
         return (
           <SheetTable
             key={`${n.name}-${idx}`}
@@ -464,6 +542,7 @@ export const EmbeddedExcelWorkbookPdf: React.FC<
             merges={merges}
             fillable={fill}
             imagesByKey={imgs}
+            checkboxCells={cbCells}
             truncated={truncated}
             startOnNewPage={idx > 0}
           />

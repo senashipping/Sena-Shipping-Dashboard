@@ -1044,15 +1044,27 @@ const HandsontableWorkbook = React.forwardRef<
   const normalizeLegacyCheckboxValues = React.useCallback(
     (sheet?: SheetData) => {
       if (!sheet?.grid?.length || !sheet?.cellMeta?.length) return;
-      const checkboxCoords = new Set<string>();
+      // Map each checkbox cell coord → its proper checked/unchecked string values.
+      // YES/NO pairs must normalize to "YES"/"NO" (not "true"/""), because HOT's
+      // checkboxRenderer shows #bad-value# when the stored string doesn't match
+      // checkedTemplate or uncheckedTemplate exactly.
+      const checkboxCoords = new Map<string, { checkedVal: string; uncheckedVal: string }>();
       for (const meta of sheet.cellMeta) {
         const cls = String(meta?.className || "");
-        const isCheckboxMeta =
+        if (Boolean(extractYesNoPairToken(cls))) {
+          checkboxCoords.set(cellCoordKey(meta.row, meta.col), {
+            checkedVal: "YES",
+            uncheckedVal: "NO",
+          });
+        } else if (
           String(meta?.type || "") === "checkbox" ||
-          Boolean(extractYesNoPairToken(cls)) ||
-          cls.split(/\s+/).includes(SINGLE_CHECKBOX_CLASS);
-        if (isCheckboxMeta)
-          checkboxCoords.add(cellCoordKey(meta.row, meta.col));
+          cls.split(/\s+/).includes(SINGLE_CHECKBOX_CLASS)
+        ) {
+          checkboxCoords.set(cellCoordKey(meta.row, meta.col), {
+            checkedVal: "true",
+            uncheckedVal: "",
+          });
+        }
       }
       if (checkboxCoords.size === 0) return;
 
@@ -1062,9 +1074,10 @@ const HandsontableWorkbook = React.forwardRef<
         let rowChanged = false;
         const nextRow = [...row];
         for (let c = 0; c < row.length; c++) {
-          if (!checkboxCoords.has(cellCoordKey(r, c))) continue;
+          const norm = checkboxCoords.get(cellCoordKey(r, c));
+          if (!norm) continue;
           const raw = row[c];
-          const normalized = toCheckboxChecked(raw) ? "true" : "";
+          const normalized = toCheckboxChecked(raw) ? norm.checkedVal : norm.uncheckedVal;
           if (String(raw ?? "") !== normalized) {
             nextRow[c] = normalized;
             rowChanged = true;
