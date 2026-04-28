@@ -15,7 +15,14 @@ export type EmbeddedExcelPdfSheet = {
     rowspan: number;
     colspan: number;
   }>;
-  cellMeta?: Array<{ row: number; col: number; className?: string }>;
+  cellMeta?: Array<{
+    row: number;
+    col: number;
+    className?: string;
+    type?: string;
+    checkedTemplate?: string;
+    uncheckedTemplate?: string;
+  }>;
   images?: Array<{
     row: number;
     col: number;
@@ -103,23 +110,9 @@ function isEmptyRow(
   return true;
 }
 
-/** Convert raw checkbox cell values to a readable symbol for PDF. */
-function checkboxDisplayValue(
-  raw: string,
-  isYesNo: boolean,
-  isSingleOrType: boolean,
-): string {
-  if (isYesNo) {
-    if (raw === "YES") return "✓"; // ✓
-    if (raw === "NO" || raw === "") return "";
-    return raw;
-  }
-  if (isSingleOrType) {
-    if (raw === "true") return "✓"; // ✓
-    if (raw === "") return "";
-    return raw;
-  }
-  return raw;
+/** Returns "✓" when the raw cell value matches its checkedTemplate, "" otherwise. */
+function checkboxDisplayValue(raw: string, checkedTemplate: string): string {
+  return raw === checkedTemplate ? "✓" : "";
 }
 
 function toSafeGrid(raw: unknown): string[][] {
@@ -162,7 +155,7 @@ function clipMerges(
   return out;
 }
 
-type CheckboxCellInfo = { isYesNo: boolean; isSingleOrType: boolean };
+type CheckboxCellInfo = { checkedTemplate: string };
 
 function normalizeSheet(
   sheet: EmbeddedExcelPdfSheet,
@@ -197,13 +190,12 @@ function normalizeSheet(
     const key = `${+m.row},${+m.col}`;
     if (cls.includes("meta-fillable")) fillable.add(key);
     const tokens = cls.split(/\s+/);
-    const isYesNo = tokens.some((t) => t.startsWith(YES_NO_PAIR_TOKEN_PREFIX));
-    const isSingleOrType =
-      !isYesNo &&
-      (tokens.includes(SINGLE_CHECKBOX_CLASS) ||
-        String((m as any).type || "") === "checkbox");
-    if (isYesNo || isSingleOrType) {
-      checkboxCells.set(key, { isYesNo, isSingleOrType });
+    const isCheckbox =
+      tokens.some((t) => t.startsWith(YES_NO_PAIR_TOKEN_PREFIX)) ||
+      tokens.includes(SINGLE_CHECKBOX_CLASS) ||
+      String(m.type || "") === "checkbox";
+    if (isCheckbox && typeof m.checkedTemplate === "string") {
+      checkboxCells.set(key, { checkedTemplate: m.checkedTemplate });
     }
   }
   const imagesByKey = new Map<string, EmbeddedSheetImage>();
@@ -394,7 +386,7 @@ function SheetTable({
         const rawTxt = grid[r]?.[c] ?? "";
         const cbInfo = checkboxCells.get(`${r},${c}`);
         const txt = cbInfo
-          ? checkboxDisplayValue(rawTxt, cbInfo.isYesNo, cbInfo.isSingleOrType)
+          ? checkboxDisplayValue(rawTxt, cbInfo.checkedTemplate)
           : rawTxt;
         const fill = fillable.has(`${r},${c}`);
         const img = imagesByKey.get(`${r},${c}`);
@@ -424,7 +416,7 @@ function SheetTable({
       const rawTxt = grid[r]?.[c] ?? "";
       const cbInfo = checkboxCells.get(`${r},${c}`);
       const txt = cbInfo
-        ? checkboxDisplayValue(rawTxt, cbInfo.isYesNo, cbInfo.isSingleOrType)
+        ? checkboxDisplayValue(rawTxt, cbInfo.checkedTemplate)
         : rawTxt;
       const fill = fillable.has(`${r},${c}`);
       const img = imagesByKey.get(`${r},${c}`);
