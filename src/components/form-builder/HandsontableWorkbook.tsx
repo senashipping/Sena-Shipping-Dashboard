@@ -2118,11 +2118,20 @@ const duplicateActiveSheet = () => {
   React.useEffect(() => {
     initializeHyperFormula();
     refreshFormulaDisplays();
+    // Effect 2045 may have written stale formulaCachedValues from incoming parent
+    // data into cellMetaRef before this effect ran. Re-sync so the next HOT render
+    // (scroll, click, etc.) reads the values HyperFormula just computed — not the
+    // pre-edit originals that came back from the parent roundtrip.
+    for (const s of workbookRef.current.sheets) {
+      setSheetCellMetaFromList(s.name || "Sheet", s.cellMeta || []);
+    }
+    const hot = hotRef.current?.hotInstance;
+    if (hot) hot.render();
     return () => {
       hfRef.current?.destroy();
       hfRef.current = null;
     };
-  }, [incomingWorkbookKey, initializeHyperFormula, refreshFormulaDisplays]);
+  }, [incomingWorkbookKey, initializeHyperFormula, refreshFormulaDisplays, setSheetCellMetaFromList]);
 
   // ─── cell renderer ───────────────────────────────────────────────────────────
   React.useEffect(() => {
