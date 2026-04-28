@@ -44,6 +44,8 @@ const C = {
   fillableBg: "#fffbe6",
   white: "#ffffff",
   sheetTitle: "#0f2341",
+  checkboxBorder: "#1e2a38",
+  checkboxFill: "#1e2a38",
 };
 
 const MAX_ROWS = 260;
@@ -90,6 +92,19 @@ const es = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 2,
   },
+  checkboxOuter: {
+    width: 7,
+    height: 7,
+    borderWidth: 0.75,
+    borderColor: C.checkboxBorder,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxInner: {
+    width: 4,
+    height: 4,
+    backgroundColor: C.checkboxFill,
+  },
 });
 
 /** Returns true when the row has no content, no fillable cells, and no merge involvement. */
@@ -111,11 +126,23 @@ function isEmptyRow(
   return true;
 }
 
-/** Returns "✓" when the raw cell value is checked, "" otherwise.
- *  Falls back to toCheckboxChecked for legacy boolean-as-string values ("true"/"false")
- *  stored before proper template normalization. */
-function checkboxDisplayValue(raw: string, checkedTemplate: string): string {
-  return raw === checkedTemplate || toCheckboxChecked(raw) ? "✓" : "";
+/** Returns true when the raw cell value represents a checked checkbox.
+ *  Matches the stored checkedTemplate exactly OR falls back to toCheckboxChecked
+ *  for legacy boolean-as-string values ("true"/"false") that some submissions
+ *  carry from before proper template normalization. */
+function isCheckboxChecked(raw: string, checkedTemplate: string): boolean {
+  return raw === checkedTemplate || toCheckboxChecked(raw);
+}
+
+/** Renders a small checkbox indicator (filled when checked, empty box otherwise).
+ *  Used in PDF cells because the standard PDF Helvetica font doesn't include
+ *  Unicode glyphs like ✓ — drawing a styled <View> avoids missing-glyph blanks. */
+function CheckboxMark({ checked }: { checked: boolean }) {
+  return (
+    <View style={es.checkboxOuter}>
+      {checked ? <View style={es.checkboxInner} /> : null}
+    </View>
+  );
 }
 
 function toSafeGrid(raw: unknown): string[][] {
@@ -397,9 +424,6 @@ function SheetTable({
         const w = (anch.colspan / cols) * 100;
         const rawTxt = grid[r]?.[c] ?? "";
         const cbInfo = checkboxCells.get(`${r},${c}`);
-        const txt = cbInfo
-          ? checkboxDisplayValue(rawTxt, cbInfo.checkedTemplate)
-          : rawTxt;
         const fill = fillable.has(`${r},${c}`);
         const img = imagesByKey.get(`${r},${c}`);
         segments.push(
@@ -416,9 +440,15 @@ function SheetTable({
                 style={{ width: 36, height: 14, objectFit: "contain" }}
               />
             ) : null}
-            <Text style={es.cellInner} wrap>
-              {txt}
-            </Text>
+            {cbInfo ? (
+              <CheckboxMark
+                checked={isCheckboxChecked(rawTxt, cbInfo.checkedTemplate)}
+              />
+            ) : (
+              <Text style={es.cellInner} wrap>
+                {rawTxt}
+              </Text>
+            )}
           </View>,
         );
         c += anch.colspan;
@@ -427,9 +457,6 @@ function SheetTable({
       const w = (1 / cols) * 100;
       const rawTxt = grid[r]?.[c] ?? "";
       const cbInfo = checkboxCells.get(`${r},${c}`);
-      const txt = cbInfo
-        ? checkboxDisplayValue(rawTxt, cbInfo.checkedTemplate)
-        : rawTxt;
       const fill = fillable.has(`${r},${c}`);
       const img = imagesByKey.get(`${r},${c}`);
       segments.push(
@@ -443,9 +470,15 @@ function SheetTable({
               style={{ width: 36, height: 14, objectFit: "contain" }}
             />
           ) : null}
-          <Text style={es.cellInner} wrap>
-            {txt}
-          </Text>
+          {cbInfo ? (
+            <CheckboxMark
+              checked={isCheckboxChecked(rawTxt, cbInfo.checkedTemplate)}
+            />
+          ) : (
+            <Text style={es.cellInner} wrap>
+              {rawTxt}
+            </Text>
+          )}
         </View>,
       );
       c += 1;
